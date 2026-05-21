@@ -181,6 +181,7 @@ a {
 }
 
 .secret input,
+.field select,
 .modal input,
 .modal textarea {
   background: rgba(255, 255, 255, 0.94);
@@ -194,6 +195,7 @@ a {
 }
 
 .secret input:focus,
+.field select:focus,
 .modal input:focus,
 .modal textarea:focus {
   border-color: rgba(109, 99, 255, 0.5);
@@ -657,6 +659,123 @@ tbody tr:hover {
   max-height: 74vh;
   max-width: min(920px, 96vw);
   object-fit: contain;
+}
+
+.liffShell {
+  display: grid;
+  gap: 16px;
+  margin: 0 auto;
+  max-width: 720px;
+  min-height: 100vh;
+  padding: 18px 14px 36px;
+}
+
+.liffHero,
+.liffCard {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 24px;
+  box-shadow: var(--shadow-soft);
+  display: grid;
+  gap: 14px;
+  overflow: hidden;
+  padding: 22px;
+  position: relative;
+}
+
+.liffHero::before,
+.liffCard::before {
+  background: linear-gradient(90deg, #ff9ec1, #ffe29c, #a5f3c9, #8eeaff, #b8adff);
+  content: "";
+  height: 4px;
+  inset: 0 0 auto;
+  position: absolute;
+}
+
+.liffHero h1 {
+  font-size: clamp(30px, 11vw, 48px);
+  letter-spacing: 0;
+  line-height: 1.08;
+  margin: 0;
+}
+
+.liffHero p {
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.targetList {
+  display: grid;
+  gap: 10px;
+}
+
+.targetOption {
+  align-items: center;
+  background: rgba(249, 250, 255, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  color: var(--text);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 76px;
+  padding: 14px;
+  text-align: left;
+  width: 100%;
+}
+
+.targetOption.active {
+  background: linear-gradient(135deg, rgba(115, 103, 255, 0.14), rgba(76, 199, 247, 0.14));
+  border-color: rgba(109, 99, 255, 0.35);
+  box-shadow: 0 12px 28px rgba(109, 99, 255, 0.12);
+}
+
+.targetOption span {
+  display: grid;
+  gap: 4px;
+}
+
+.targetOption small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.targetOption b {
+  color: #514bd5;
+  white-space: nowrap;
+}
+
+.liffPrimary {
+  width: 100%;
+}
+
+.qrCard {
+  justify-items: center;
+  text-align: center;
+}
+
+.qrCard h2 {
+  margin: 0;
+}
+
+.qrCard img {
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  max-width: 320px;
+  padding: 12px;
+  width: min(100%, 320px);
+}
+
+.emptyState {
+  background: rgba(249, 250, 255, 0.9);
+  border: 1px dashed rgba(109, 99, 255, 0.28);
+  border-radius: 18px;
+  color: var(--muted);
+  font-weight: 800;
+  padding: 18px;
+  text-align: center;
 }
 
 @media (max-width: 1100px) {

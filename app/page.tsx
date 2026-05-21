@@ -299,6 +299,7 @@ export default function Home() {
   const unpaidCount = events.reduce((sum, event) => sum + event.unpaid_count, 0);
   const totalDue = events.reduce((sum, event) => sum + Number(event.expected_total ?? 0), 0);
   const webhookUrl = `${origin || "https://your-domain.vercel.app"}/api/line/webhook`;
+  const liffUrl = `${origin || "https://your-domain.vercel.app"}/liff`;
   const targetRows =
     detail?.targets.filter((target) => {
       if (targetFilter === "paid") return target.status === "verified";
@@ -762,16 +763,28 @@ export default function Home() {
               <ul className="setupList">
                 <li>LINE_CHANNEL_SECRET</li>
                 <li>LINE_CHANNEL_ACCESS_TOKEN</li>
+                <li>NEXT_PUBLIC_LIFF_ID</li>
+                <li>LINE_LIFF_CHANNEL_ID</li>
                 <li>NEXT_PUBLIC_SUPABASE_URL</li>
                 <li>SUPABASE_SERVICE_ROLE_KEY</li>
                 <li>SUPABASE_SLIPS_BUCKET</li>
               </ul>
             </div>
             <div className="setupCard">
+              <span className="setupLabel">LIFF Endpoint URL</span>
+              <code className="codeBox">{liffUrl}</code>
+              <button
+                className="btn subtle"
+                onClick={() => navigator.clipboard.writeText(liffUrl)}
+              >
+                คัดลอก LIFF URL
+              </button>
+            </div>
+            <div className="setupCard">
               <span className="setupLabel">วิธีทดสอบ</span>
               <p className="muted">
-                หลังใส่ค่า LINE แล้ว ให้เปิด Webhook ใน LINE Developers, กด Verify,
-                เพิ่ม LINE OA เป็นเพื่อน แล้วส่งรูปสลิปเข้ามา ระบบจะบันทึกไฟล์เข้า Supabase Storage
+                หลังใส่ค่า LINE แล้ว ให้สร้าง LIFF app โดยใช้ Endpoint URL นี้,
+                นำ LIFF URL ไปผูกกับ Rich Menu, เพิ่ม LINE OA เป็นเพื่อน แล้วเลือกชื่อก่อนส่งสลิป
               </p>
             </div>
           </div>
