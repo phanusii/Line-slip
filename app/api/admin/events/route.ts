@@ -5,7 +5,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
   try {
-    assertAdmin(request);
+    assertAdmin(request, "viewer");
     const supabase = createServiceClient();
 
     const { data, error } = await supabase

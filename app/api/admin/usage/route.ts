@@ -8,7 +8,7 @@ const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
 
 export async function GET(request: NextRequest) {
   try {
-    assertAdmin(request);
+    assertAdmin(request, "viewer");
     const supabase = createServiceClient();
 
     const [slips, targets, events] = await Promise.all([

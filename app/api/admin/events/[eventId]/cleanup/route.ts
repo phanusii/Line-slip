@@ -57,7 +57,7 @@ export async function POST(
     if (body.mode === "files") {
       const updated = await supabase
         .from("slip_submissions")
-        .update({ storage_path: null, file_deleted_at: now })
+        .update({ storage_path: null, file_deleted_at: now, status: "deleted" })
         .eq("event_id", eventId)
         .is("file_deleted_at", null);
       if (updated.error) throw updated.error;
@@ -66,7 +66,12 @@ export async function POST(
     if (body.mode === "files_and_metadata") {
       const updated = await supabase
         .from("slip_submissions")
-        .update({ storage_path: null, file_deleted_at: now, metadata_deleted_at: now })
+        .update({
+          storage_path: null,
+          file_deleted_at: now,
+          metadata_deleted_at: now,
+          status: "deleted"
+        })
         .eq("event_id", eventId);
       if (updated.error) throw updated.error;
     }
@@ -80,9 +85,20 @@ export async function POST(
 
       const updatedSlips = await supabase
         .from("slip_submissions")
-        .update({ storage_path: null, file_deleted_at: now, metadata_deleted_at: now })
+        .update({
+          storage_path: null,
+          file_deleted_at: now,
+          metadata_deleted_at: now,
+          status: "deleted"
+        })
         .eq("event_id", eventId);
       if (updatedSlips.error) throw updatedSlips.error;
+
+      const updatedTargets = await supabase
+        .from("payment_targets")
+        .update({ status: "deleted" })
+        .eq("event_id", eventId);
+      if (updatedTargets.error) throw updatedTargets.error;
     }
 
     const audit = await supabase.from("audit_logs").insert({

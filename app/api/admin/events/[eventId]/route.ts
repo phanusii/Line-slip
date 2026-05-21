@@ -8,7 +8,7 @@ export async function GET(
   context: { params: Promise<{ eventId: string }> }
 ) {
   try {
-    assertAdmin(request);
+    assertAdmin(request, "viewer");
     const { eventId } = await context.params;
     const supabase = createServiceClient();
 

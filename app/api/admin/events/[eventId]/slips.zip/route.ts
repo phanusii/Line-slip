@@ -19,7 +19,7 @@ export async function GET(
       supabase.from("events").select("name,slug").eq("id", eventId).single(),
       supabase
         .from("slip_submissions")
-        .select("id,storage_bucket,storage_path,status,amount_expected,created_at,payment_targets(display_name)")
+        .select("id,storage_bucket,storage_path,status,amount_expected,created_at,payment_target_id")
         .eq("event_id", eventId)
         .is("metadata_deleted_at", null)
         .not("storage_path", "is", null)
@@ -28,6 +28,15 @@ export async function GET(
 
     if (event.error) throw event.error;
     if (slips.error) throw slips.error;
+
+    const targetIds = slips.data
+      .map((slip) => slip.payment_target_id)
+      .filter((id): id is string => Boolean(id));
+    const targets = targetIds.length
+      ? await supabase.from("payment_targets").select("id,display_name").in("id", targetIds)
+      : null;
+
+    if (targets?.error) throw targets.error;
 
     const archive = archiver("zip", { zlib: { level: 9 } });
     const stream = new PassThrough();
@@ -43,9 +52,7 @@ export async function GET(
           if (file.error) continue;
 
           const buffer = Buffer.from(await file.data.arrayBuffer());
-          const target = Array.isArray(slip.payment_targets)
-            ? slip.payment_targets[0]
-            : slip.payment_targets;
+          const target = targets?.data?.find((row) => row.id === slip.payment_target_id);
           const person = safeFilePart(target?.display_name ?? "unknown");
           const amount = Number(slip.amount_expected ?? 0).toFixed(2);
           const date = new Date(slip.created_at).toISOString().slice(0, 10);

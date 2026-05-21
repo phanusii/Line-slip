@@ -132,6 +132,8 @@ export default function Home() {
     mode: CleanupMode;
     event: EventSummary;
   } | null>(null);
+  const [targetFilter, setTargetFilter] = useState("unpaid");
+  const [slipFilter, setSlipFilter] = useState("all");
   const [confirmName, setConfirmName] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
@@ -230,11 +232,49 @@ export default function Home() {
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }
 
+  async function updateSlipStatus(slipId: string, status: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/api/admin/slips/${slipId}/status`, secret, {
+        method: "POST",
+        body: JSON.stringify({
+          status,
+          reason: "ปรับสถานะจากแดชบอร์ดผู้ดูแล"
+        })
+      });
+      if (selectedEventId) {
+        setDetail(await api<EventDetail>(`/api/admin/events/${selectedEventId}`, secret));
+      }
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const storagePct = usage ? percent(usage.storage.used_bytes, usage.storage.limit_bytes) : 0;
   const dbPct = usage ? percent(usage.database.used_bytes_estimate, usage.database.limit_bytes) : 0;
   const paidCount = events.reduce((sum, event) => sum + event.paid_count, 0);
   const unpaidCount = events.reduce((sum, event) => sum + event.unpaid_count, 0);
   const totalDue = events.reduce((sum, event) => sum + Number(event.expected_total ?? 0), 0);
+  const targetRows =
+    detail?.targets.filter((target) => {
+      if (targetFilter === "paid") return target.status === "verified";
+      if (targetFilter === "review") return target.status === "manual_review";
+      if (targetFilter === "unpaid") return target.status !== "verified";
+      return true;
+    }) ?? [];
+  const slipRows =
+    detail?.slips.filter((slip) => {
+      if (slipFilter === "review") return slip.status === "manual_review";
+      if (slipFilter === "paid") return slip.status === "verified";
+      if (slipFilter === "problem") {
+        return ["amount_mismatch", "duplicate_slip", "rejected"].includes(slip.status);
+      }
+      return true;
+    }) ?? [];
 
   return (
     <div className="page">
@@ -441,12 +481,28 @@ export default function Home() {
             <div className="panel">
               <div className="panelHeader">
                 <div>
-                  <h2>ยังไม่จ่าย</h2>
+                  <h2>รายชื่อการชำระเงิน</h2>
                   <p className="muted">{selectedEvent.name}</p>
                 </div>
                 <span className="circleIcon">
                   <Users size={20} />
                 </span>
+              </div>
+              <div className="segmented">
+                {[
+                  ["unpaid", "ยังไม่จ่าย"],
+                  ["paid", "จ่ายแล้ว"],
+                  ["review", "รอตรวจ"],
+                  ["all", "ทั้งหมด"]
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={targetFilter === value ? "active" : ""}
+                    onClick={() => setTargetFilter(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
               <div className="tableWrap">
                 <table className="dataTable compactTable">
@@ -458,34 +514,43 @@ export default function Home() {
                     </tr>
                   </thead>
                   <tbody>
-                    {detail.targets
-                      .filter((target) => target.status !== "verified")
-                      .map((target) => (
-                        <tr key={target.id}>
-                          <td>{target.display_name}</td>
-                          <td>{formatMoney(target.amount_due)}</td>
-                          <td>
-                            <span className="badge warn">
-                              {statusLabels[target.status] ?? target.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                    {targetRows.map((target) => (
+                      <tr key={target.id}>
+                        <td>{target.display_name}</td>
+                        <td>{formatMoney(target.amount_due)}</td>
+                        <td>
+                          <span className={target.status === "verified" ? "badge ok" : "badge warn"}>
+                            {statusLabels[target.status] ?? target.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
-              <button
-                className="btn subtle"
-                onClick={() => {
-                  const text = detail.targets
-                    .filter((target) => target.status !== "verified")
-                    .map((target) => `${target.display_name} ${formatMoney(target.amount_due)} บาท`)
-                    .join("\n");
-                  navigator.clipboard.writeText(text);
-                }}
-              >
-                คัดลอกรายชื่อยังไม่จ่าย
-              </button>
+              <div className="actions panelActions">
+                <button
+                  className="btn subtle"
+                  onClick={() => {
+                    const text = detail.targets
+                      .filter((target) => target.status !== "verified")
+                      .map((target) => `${target.display_name} ${formatMoney(target.amount_due)} บาท`)
+                      .join("\n");
+                    navigator.clipboard.writeText(text);
+                  }}
+                >
+                  คัดลอกรายชื่อยังไม่จ่าย
+                </button>
+                <button
+                  className="btn subtle"
+                  onClick={() =>
+                    authenticatedDownload(`/api/admin/events/${selectedEvent.id}/unpaid.csv`)
+                  }
+                >
+                  <FileSpreadsheet size={15} />
+                  ดาวน์โหลดรายชื่อค้างจ่าย
+                </button>
+              </div>
             </div>
 
             <div className="panel">
@@ -495,6 +560,15 @@ export default function Home() {
                   <p className="muted">เปิดดูผ่าน signed URL และจัดการข้อมูลหลังปิดงาน</p>
                 </div>
                 <div className="actions">
+                  <button
+                    className="btn subtle"
+                    onClick={() =>
+                      authenticatedDownload(`/api/admin/events/${selectedEvent.id}/unpaid.csv`)
+                    }
+                  >
+                    <FileSpreadsheet size={15} />
+                    รายชื่อค้างจ่าย
+                  </button>
                   <button
                     className="btn danger"
                     onClick={() => setCleanup({ mode: "files_and_metadata", event: selectedEvent })}
@@ -509,6 +583,22 @@ export default function Home() {
                   </button>
                 </div>
               </div>
+              <div className="segmented">
+                {[
+                  ["all", "ทั้งหมด"],
+                  ["review", "รอตรวจ"],
+                  ["paid", "จ่ายแล้ว"],
+                  ["problem", "มีปัญหา"]
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={slipFilter === value ? "active" : ""}
+                    onClick={() => setSlipFilter(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <div className="tableWrap">
                 <table className="dataTable compactTable">
                   <thead>
@@ -518,28 +608,54 @@ export default function Home() {
                       <th>ยอด</th>
                       <th>ขนาด</th>
                       <th>วันที่</th>
-                      <th>ดู</th>
+                      <th>จัดการ</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {detail.slips.map((slip) => (
+                    {slipRows.map((slip) => (
                       <tr key={slip.id}>
                         <td>{slip.payment_targets?.display_name ?? "-"}</td>
                         <td>
-                          <span className="badge">{statusLabels[slip.status] ?? slip.status}</span>
+                          <span className={slip.status === "verified" ? "badge ok" : "badge"}>
+                            {statusLabels[slip.status] ?? slip.status}
+                          </span>
                         </td>
                         <td>{formatMoney(slip.amount_expected)}</td>
                         <td>{formatBytes(slip.file_size)}</td>
                         <td>{new Date(slip.created_at).toLocaleString("th-TH")}</td>
                         <td>
-                          <button
-                            className="btn"
-                            disabled={!slip.storage_path || Boolean(slip.file_deleted_at)}
-                            onClick={() => openSlip(slip.id)}
-                          >
-                            <Eye size={15} />
-                            เปิด
-                          </button>
+                          <div className="actions">
+                            <button
+                              className="btn subtle"
+                              disabled={!slip.storage_path || Boolean(slip.file_deleted_at)}
+                              onClick={() => openSlip(slip.id)}
+                            >
+                              <Eye size={15} />
+                              เปิด
+                            </button>
+                            <button
+                              className="btn subtle"
+                              disabled={!slip.storage_path || Boolean(slip.file_deleted_at)}
+                              onClick={() => authenticatedDownload(`/api/admin/slips/${slip.id}/download`)}
+                            >
+                              <Download size={15} />
+                              โหลด
+                            </button>
+                            <button
+                              className="btn subtle"
+                              disabled={busy || slip.status === "verified"}
+                              onClick={() => updateSlipStatus(slip.id, "verified")}
+                            >
+                              อนุมัติ
+                            </button>
+                            <button
+                              className="btn danger"
+                              disabled={busy || slip.status === "rejected"}
+                              onClick={() => updateSlipStatus(slip.id, "rejected")}
+                            >
+                              ปฏิเสธ
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

@@ -380,6 +380,36 @@ tbody tr:hover {
   gap: 10px;
 }
 
+.panelActions {
+  margin-top: 14px;
+}
+
+.segmented {
+  background: rgba(245, 248, 255, 0.82);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: -4px 0 16px;
+  padding: 6px;
+}
+
+.segmented button {
+  background: transparent;
+  border-radius: 12px;
+  color: var(--muted);
+  font-weight: 800;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.segmented button.active {
+  background: white;
+  box-shadow: 0 8px 20px rgba(79, 90, 137, 0.1);
+  color: #514bd5;
+}
+
 .btn,
 .iconButton {
   align-items: center;
@@ -594,6 +624,10 @@ tbody tr:hover {
     display: grid;
     grid-template-columns: 1fr;
     width: 100%;
+  }
+
+  .segmented {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .btn {
