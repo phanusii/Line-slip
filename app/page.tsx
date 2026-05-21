@@ -124,6 +124,8 @@ export default function Home() {
   } | null>(null);
   const [targetFilter, setTargetFilter] = useState("unpaid");
   const [slipFilter, setSlipFilter] = useState("all");
+  const [activePage, setActivePage] = useState("overview");
+  const [origin, setOrigin] = useState("");
   const [confirmName, setConfirmName] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
@@ -135,6 +137,10 @@ export default function Home() {
   useEffect(() => {
     if (secret) window.localStorage.setItem("admin-secret", secret);
   }, [secret]);
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === selectedEventId) ?? events[0],
@@ -249,6 +255,7 @@ export default function Home() {
   const paidCount = events.reduce((sum, event) => sum + event.paid_count, 0);
   const unpaidCount = events.reduce((sum, event) => sum + event.unpaid_count, 0);
   const totalDue = events.reduce((sum, event) => sum + Number(event.expected_total ?? 0), 0);
+  const webhookUrl = `${origin || "https://your-domain.vercel.app"}/api/line/webhook`;
   const targetRows =
     detail?.targets.filter((target) => {
       if (targetFilter === "paid") return target.status === "verified";
@@ -324,7 +331,26 @@ export default function Home() {
           </section>
         ) : null}
 
-        <section className="overviewStrip">
+        <nav className="pageTabs" aria-label="เมนูหลังบ้าน">
+          {[
+            ["overview", "ภาพรวม"],
+            ["events", "งานเรียกเก็บเงิน"],
+            ["targets", "รายชื่อ"],
+            ["slips", "ไฟล์สลิป"],
+            ["storage", "พื้นที่/ล้างข้อมูล"],
+            ["line", "ตั้งค่า LINE"]
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              className={activePage === value ? "active" : ""}
+              onClick={() => setActivePage(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        <section className="overviewStrip" hidden={activePage !== "overview"}>
           <div>
             <span>งานทั้งหมด</span>
             <strong>{events.length}</strong>
@@ -343,7 +369,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="grid">
+        <section className="grid" hidden={activePage !== "overview" && activePage !== "storage"}>
           <div className="panel stat accentMint">
             <div className="panelHeader">
               <h2>พื้นที่เก็บไฟล์</h2>
@@ -386,7 +412,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="panel">
+        <section className="panel" hidden={activePage !== "events" && activePage !== "storage"}>
           <div className="panelHeader">
             <div>
               <h2>งานเรียกเก็บเงิน</h2>
@@ -467,8 +493,11 @@ export default function Home() {
         </section>
 
         {selectedEvent && detail ? (
-          <section className="detailGrid">
-            <div className="panel">
+          <section
+            className="detailGrid"
+            hidden={activePage !== "targets" && activePage !== "slips"}
+          >
+            <div className="panel" hidden={activePage !== "targets"}>
               <div className="panelHeader">
                 <div>
                   <h2>รายชื่อการชำระเงิน</h2>
@@ -543,7 +572,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="panel">
+            <div className="panel" hidden={activePage !== "slips"}>
               <div className="panelHeader">
                 <div>
                   <h2>ไฟล์สลิป</h2>
@@ -655,6 +684,45 @@ export default function Home() {
             </div>
           </section>
         ) : null}
+
+        <section className="panel" hidden={activePage !== "line"}>
+          <div className="panelHeader">
+            <div>
+              <h2>ตั้งค่าการเชื่อมต่อ LINE</h2>
+              <p className="muted">นำ Webhook URL นี้ไปใส่ใน LINE Developers และตั้งค่า Environment Variables บน Vercel</p>
+            </div>
+            <span className="badge ok">พร้อมใช้งาน Webhook</span>
+          </div>
+          <div className="lineGrid">
+            <div className="setupCard">
+              <span className="setupLabel">Webhook URL</span>
+              <code className="codeBox">{webhookUrl}</code>
+              <button
+                className="btn subtle"
+                onClick={() => navigator.clipboard.writeText(webhookUrl)}
+              >
+                คัดลอก Webhook URL
+              </button>
+            </div>
+            <div className="setupCard">
+              <span className="setupLabel">Environment Variables ที่ต้องมี</span>
+              <ul className="setupList">
+                <li>LINE_CHANNEL_SECRET</li>
+                <li>LINE_CHANNEL_ACCESS_TOKEN</li>
+                <li>NEXT_PUBLIC_SUPABASE_URL</li>
+                <li>SUPABASE_SERVICE_ROLE_KEY</li>
+                <li>SUPABASE_SLIPS_BUCKET</li>
+              </ul>
+            </div>
+            <div className="setupCard">
+              <span className="setupLabel">วิธีทดสอบ</span>
+              <p className="muted">
+                หลังใส่ค่า LINE แล้ว ให้เปิด Webhook ใน LINE Developers, กด Verify,
+                เพิ่ม LINE OA เป็นเพื่อน แล้วส่งรูปสลิปเข้ามา ระบบจะบันทึกไฟล์เข้า Supabase Storage
+              </p>
+            </div>
+          </div>
+        </section>
       </main>
 
       {cleanup ? (

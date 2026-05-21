@@ -219,6 +219,35 @@ a {
   overflow: hidden;
 }
 
+.pageTabs {
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: var(--shadow-soft);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  padding: 8px;
+  position: sticky;
+  top: 12px;
+  z-index: 20;
+}
+
+.pageTabs button {
+  background: transparent;
+  border-radius: 16px;
+  color: var(--muted);
+  font-weight: 900;
+  min-height: 46px;
+  padding: 10px 12px;
+}
+
+.pageTabs button.active {
+  background: linear-gradient(135deg, rgba(115, 103, 255, 0.14), rgba(76, 199, 247, 0.16));
+  box-shadow: 0 10px 24px rgba(79, 90, 137, 0.12);
+  color: #514bd5;
+}
+
 .overviewStrip div {
   background: rgba(255, 255, 255, 0.58);
   display: grid;
@@ -506,6 +535,48 @@ tbody tr:hover {
   grid-template-columns: minmax(320px, 0.82fr) minmax(420px, 1.18fr);
 }
 
+.lineGrid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(320px, 1.2fr) minmax(260px, 0.8fr) minmax(260px, 0.8fr);
+}
+
+.setupCard {
+  background: rgba(249, 250, 255, 0.86);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.setupLabel {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.codeBox {
+  background: #202840;
+  border-radius: 14px;
+  color: #e9f7ff;
+  display: block;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-x: auto;
+  padding: 14px;
+  white-space: nowrap;
+}
+
+.setupList {
+  color: var(--text);
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
 .modalBackdrop {
   align-items: center;
   backdrop-filter: blur(12px);
@@ -598,6 +669,11 @@ tbody tr:hover {
     grid-template-columns: repeat(2, 1fr);
   }
 
+  .pageTabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    position: static;
+  }
+
   .overviewStrip div {
     min-height: 82px;
     padding: 14px;
@@ -628,6 +704,10 @@ tbody tr:hover {
 
   .segmented {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lineGrid {
+    grid-template-columns: 1fr;
   }
 
   .btn {
@@ -665,7 +745,15 @@ tbody tr:hover {
     grid-template-columns: repeat(4, 1fr);
   }
 
+  .pageTabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .dataTable {
     min-width: 800px;
+  }
+
+  .lineGrid {
+    grid-template-columns: 1fr;
   }
 }
