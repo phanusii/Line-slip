@@ -9,6 +9,7 @@ import {
   Eye,
   FileSpreadsheet,
   HardDrive,
+  Plus,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -69,6 +70,10 @@ type EventDetail = {
 
 type CleanupMode = "files" | "files_and_metadata" | "event";
 
+const exampleTargetsText = `สมชาย\t500
+สมหญิง\t500
+มานะ\t500`;
+
 const cleanupModeLabels: Record<CleanupMode, string> = {
   files: "ลบเฉพาะรูปสลิป",
   files_and_metadata: "ลบรูปและข้อมูลสลิป",
@@ -128,6 +133,11 @@ export default function Home() {
   const [origin, setOrigin] = useState("");
   const [confirmName, setConfirmName] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [createEventOpen, setCreateEventOpen] = useState(false);
+  const [newEventName, setNewEventName] = useState("");
+  const [newPromptpayId, setNewPromptpayId] = useState("");
+  const [newDefaultAmount, setNewDefaultAmount] = useState("");
+  const [newTargetsText, setNewTargetsText] = useState(exampleTargetsText);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("admin-secret");
@@ -243,6 +253,39 @@ export default function Home() {
         setDetail(await api<EventDetail>(`/api/admin/events/${selectedEventId}`, secret));
       }
       await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createEvent() {
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await api<{ event: EventSummary }>(
+        "/api/admin/events",
+        secret,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: newEventName,
+            promptpay_id: newPromptpayId,
+            default_amount: newDefaultAmount,
+            targets_text: newTargetsText
+          })
+        }
+      );
+      setCreateEventOpen(false);
+      setNewEventName("");
+      setNewPromptpayId("");
+      setNewDefaultAmount("");
+      setNewTargetsText(exampleTargetsText);
+      setSelectedEventId(data.event.id);
+      setActivePage("events");
+      await loadAll();
+      await selectEvent(data.event.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -418,7 +461,17 @@ export default function Home() {
               <h2>งานเรียกเก็บเงิน</h2>
               <p className="muted">เลือกงานเพื่อดูคนยังไม่จ่ายและรายการไฟล์สลิป</p>
             </div>
-            <span className="badge">{events.length} งาน</span>
+            <div className="actions">
+              <span className="badge">{events.length} งาน</span>
+              <button
+                className="btn primary"
+                disabled={!secret || busy}
+                onClick={() => setCreateEventOpen(true)}
+              >
+                <Plus size={16} />
+                เพิ่มงานเก็บเงิน
+              </button>
+            </div>
           </div>
           <div className="tableWrap">
             <table className="dataTable">
@@ -750,6 +803,78 @@ export default function Home() {
                 onClick={runCleanup}
               >
                 ยืนยันลบ
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {createEventOpen ? (
+        <div className="modalBackdrop">
+          <div className="modal wideModal">
+            <div>
+              <span className="badge ok">สร้างงานใหม่</span>
+              <h3>เพิ่มงานเก็บเงิน</h3>
+              <p className="muted">
+                วางรายชื่อจาก Google Sheets หรือ Excel ได้เลย ถ้าแต่ละคนยอดต่างกันให้วางเป็น “ชื่อ + ยอดเงิน”
+                ถ้ายอดเท่ากันทุกคนให้กรอกยอดกลางแล้ววางเฉพาะชื่อ
+              </p>
+            </div>
+
+            <label className="field">
+              <span>ชื่องาน</span>
+              <input
+                value={newEventName}
+                onChange={(event) => setNewEventName(event.target.value)}
+                placeholder="เช่น ค่าทริปห้อง ป.6"
+              />
+            </label>
+
+            <div className="formGrid">
+              <label className="field">
+                <span>PromptPay ID / เบอร์รับเงิน</span>
+                <input
+                  value={newPromptpayId}
+                  onChange={(event) => setNewPromptpayId(event.target.value)}
+                  placeholder="เช่น 089xxxxxxx"
+                />
+              </label>
+              <label className="field">
+                <span>ยอดกลาง กรณีทุกคนจ่ายเท่ากัน</span>
+                <input
+                  inputMode="decimal"
+                  value={newDefaultAmount}
+                  onChange={(event) => setNewDefaultAmount(event.target.value)}
+                  placeholder="เช่น 500"
+                />
+              </label>
+            </div>
+
+            <label className="field">
+              <span>รายชื่อและยอดเงิน</span>
+              <textarea
+                rows={8}
+                value={newTargetsText}
+                onChange={(event) => setNewTargetsText(event.target.value)}
+                placeholder={"สมชาย\t500\nสมหญิง\t650\nมานะ\t500"}
+              />
+            </label>
+
+            <div className="hintBox">
+              <strong>รูปแบบที่รองรับ</strong>
+              <p>สมชาย 500, สมชาย[TAB]500, หรือวางเฉพาะรายชื่อทีละบรรทัดเมื่อกรอกยอดกลางแล้ว</p>
+            </div>
+
+            <div className="actions modalActions">
+              <button className="btn" onClick={() => setCreateEventOpen(false)}>
+                ยกเลิก
+              </button>
+              <button
+                className="btn primary"
+                disabled={!newEventName.trim() || !newTargetsText.trim() || busy}
+                onClick={createEvent}
+              >
+                {busy ? "กำลังสร้าง" : "สร้างงานเก็บเงิน"}
               </button>
             </div>
           </div>

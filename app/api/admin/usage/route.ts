@@ -17,7 +17,10 @@ export async function GET(request: NextRequest) {
         .select("event_id,file_size,status,storage_path,file_deleted_at,metadata_deleted_at,events(name,slug)")
         .is("metadata_deleted_at", null),
       supabase.from("payment_targets").select("id"),
-      supabase.from("events").select("id,name,slug,is_open,archived_at,expected_total")
+      supabase
+        .from("events")
+        .select("id,name,slug,is_open,archived_at,expected_total")
+        .is("archived_at", null)
     ]);
 
     if (slips.error) throw slips.error;

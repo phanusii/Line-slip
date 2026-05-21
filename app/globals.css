@@ -601,8 +601,54 @@ tbody tr:hover {
   width: 100%;
 }
 
+.wideModal {
+  max-width: 760px;
+}
+
 .modal h3 {
   margin: 0;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.field textarea {
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.formGrid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hintBox {
+  background: linear-gradient(135deg, rgba(235, 255, 246, 0.86), rgba(239, 247, 255, 0.9));
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  color: #43506b;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+}
+
+.hintBox p {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.modalActions {
+  justify-content: flex-end;
 }
 
 .preview {
@@ -707,6 +753,10 @@ tbody tr:hover {
   }
 
   .lineGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .formGrid {
     grid-template-columns: 1fr;
   }
 
