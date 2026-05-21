@@ -8,3 +8,5 @@ dist
 coverage
 tsconfig.tsbuildinfo
 .vercel
+.env*
+supabase/.temp
