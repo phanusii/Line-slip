@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertAdmin } from "@/lib/auth";
+import { formatApiError } from "@/lib/api-error";
 import { createServiceClient } from "@/lib/supabase/server";
 
 export async function GET(
@@ -20,7 +21,7 @@ export async function GET(
         .order("display_name"),
       supabase
         .from("slip_submissions")
-        .select("*,payment_targets(display_name)")
+        .select("*")
         .eq("event_id", eventId)
         .is("metadata_deleted_at", null)
         .order("created_at", { ascending: false })
@@ -33,10 +34,19 @@ export async function GET(
     return NextResponse.json({
       event: event.data,
       targets: targets.data,
-      slips: slips.data
+      slips: slips.data.map((slip) => ({
+        ...slip,
+        payment_targets: slip.payment_target_id
+          ? {
+              display_name:
+                targets.data.find((target) => target.id === slip.payment_target_id)
+                  ?.display_name ?? "-"
+            }
+          : null
+      }))
     });
   } catch (error) {
     if (error instanceof Response) return error;
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: formatApiError(error) }, { status: 500 });
   }
 }

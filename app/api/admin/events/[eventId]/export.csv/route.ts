@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { formatApiError } from "@/lib/api-error";
 import { actorFromRequest, assertAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 
@@ -56,6 +57,6 @@ export async function GET(
     });
   } catch (error) {
     if (error instanceof Response) return error;
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: formatApiError(error) }, { status: 500 });
   }
 }

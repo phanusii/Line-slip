@@ -3,11 +3,15 @@
 import {
   AlertTriangle,
   Archive,
+  CheckCircle2,
+  Clock3,
   Download,
   Eye,
   FileSpreadsheet,
   HardDrive,
   RefreshCw,
+  ShieldCheck,
+  Sparkles,
   Trash2,
   Users
 } from "lucide-react";
@@ -170,7 +174,12 @@ export default function Home() {
 
   async function selectEvent(eventId: string) {
     setSelectedEventId(eventId);
-    setDetail(await api<EventDetail>(`/api/admin/events/${eventId}`, secret));
+    setError(null);
+    try {
+      setDetail(await api<EventDetail>(`/api/admin/events/${eventId}`, secret));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function runCleanup() {
@@ -223,37 +232,86 @@ export default function Home() {
 
   const storagePct = usage ? percent(usage.storage.used_bytes, usage.storage.limit_bytes) : 0;
   const dbPct = usage ? percent(usage.database.used_bytes_estimate, usage.database.limit_bytes) : 0;
+  const paidCount = events.reduce((sum, event) => sum + event.paid_count, 0);
+  const unpaidCount = events.reduce((sum, event) => sum + event.unpaid_count, 0);
+  const totalDue = events.reduce((sum, event) => sum + Number(event.expected_total ?? 0), 0);
 
   return (
     <div className="page">
-      <header className="topbar">
+      <header className="hero">
+        <div className="heroGlow" />
         <div className="brand">
-          <span className="brandKicker">ระบบจัดการสลิป LINE</span>
+          <span className="brandKicker">
+            <Sparkles size={15} />
+            ระบบจัดการสลิป LINE
+          </span>
           <h1>แดชบอร์ดรับสลิปและติดตามยอดโอน</h1>
-          <p>ดูพื้นที่จัดเก็บ ตรวจรายการจ่ายเงิน ดาวน์โหลดหลักฐาน และล้างข้อมูลหลังปิดงาน</p>
+          <p>รวมงานเรียกเก็บเงิน รายชื่อค้างจ่าย ไฟล์สลิป และพื้นที่ Supabase ไว้ในหน้าจอเดียว</p>
+          <div className="heroPills">
+            <span>
+              <ShieldCheck size={15} />
+              เก็บสลิปแบบ private
+            </span>
+            <span>
+              <CheckCircle2 size={15} />
+              ตรวจสถานะรายชื่อ
+            </span>
+            <span>
+              <Clock3 size={15} />
+              พร้อมล้างข้อมูลหลังปิดงาน
+            </span>
+          </div>
         </div>
-        <div className="secret">
-          <input
-            aria-label="รหัสผู้ดูแล"
-            placeholder="รหัสผู้ดูแล"
-            type="password"
-            value={secret}
-            onChange={(event) => setSecret(event.target.value)}
-          />
-          <button className="btn primary" disabled={!secret || busy} onClick={loadAll}>
-            <RefreshCw size={16} />
-            โหลดข้อมูล
-          </button>
+        <div className="loginCard">
+          <span className="loginLabel">เข้าสู่หลังบ้าน</span>
+          <div className="secret">
+            <input
+              aria-label="รหัสผู้ดูแล"
+              placeholder="รหัสผู้ดูแล"
+              type="password"
+              value={secret}
+              onChange={(event) => setSecret(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void loadAll();
+              }}
+            />
+            <button className="btn primary" disabled={!secret || busy} onClick={loadAll}>
+              <RefreshCw size={16} />
+              {busy ? "กำลังโหลด" : "โหลดข้อมูล"}
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="main">
         {error ? (
-          <section className="panel">
+          <section className="alertPanel">
             <span className="badge danger">ข้อผิดพลาด</span>
             <p>{error}</p>
+            <button className="iconButton" onClick={() => setError(null)} aria-label="ปิดข้อความผิดพลาด">
+              ปิด
+            </button>
           </section>
         ) : null}
+
+        <section className="overviewStrip">
+          <div>
+            <span>งานทั้งหมด</span>
+            <strong>{events.length}</strong>
+          </div>
+          <div>
+            <span>ยอดรวมที่ต้องเก็บ</span>
+            <strong>{formatMoney(totalDue)}</strong>
+          </div>
+          <div>
+            <span>จ่ายแล้ว</span>
+            <strong>{paidCount}</strong>
+          </div>
+          <div>
+            <span>ยังไม่จ่าย</span>
+            <strong>{unpaidCount}</strong>
+          </div>
+        </section>
 
         <section className="grid">
           <div className="panel stat accentMint">
@@ -300,11 +358,14 @@ export default function Home() {
 
         <section className="panel">
           <div className="panelHeader">
-            <h2>งานเรียกเก็บเงิน</h2>
+            <div>
+              <h2>งานเรียกเก็บเงิน</h2>
+              <p className="muted">เลือกงานเพื่อดูคนยังไม่จ่ายและรายการไฟล์สลิป</p>
+            </div>
             <span className="badge">{events.length} งาน</span>
           </div>
           <div className="tableWrap">
-            <table>
+            <table className="dataTable">
               <thead>
                 <tr>
                   <th>งาน</th>
@@ -320,7 +381,10 @@ export default function Home() {
                 {events.map((event) => (
                   <tr key={event.id}>
                     <td>
-                      <button className="btn" onClick={() => selectEvent(event.id)}>
+                      <button
+                        className={selectedEventId === event.id ? "btn selected" : "btn"}
+                        onClick={() => selectEvent(event.id)}
+                      >
                         {event.name}
                       </button>
                       <p className="muted">{event.slug}</p>
@@ -339,7 +403,7 @@ export default function Home() {
                     <td>
                       <div className="actions">
                         <button
-                          className="btn"
+                          className="btn subtle"
                           onClick={() =>
                             authenticatedDownload(`/api/admin/events/${event.id}/export.csv`)
                           }
@@ -348,7 +412,7 @@ export default function Home() {
                           ไฟล์สรุป
                         </button>
                         <button
-                          className="btn"
+                          className="btn subtle"
                           onClick={() =>
                             authenticatedDownload(`/api/admin/events/${event.id}/slips.zip`)
                           }
@@ -376,11 +440,16 @@ export default function Home() {
           <section className="detailGrid">
             <div className="panel">
               <div className="panelHeader">
-                <h2>ยังไม่จ่าย · {selectedEvent.name}</h2>
-                <Users size={20} />
+                <div>
+                  <h2>ยังไม่จ่าย</h2>
+                  <p className="muted">{selectedEvent.name}</p>
+                </div>
+                <span className="circleIcon">
+                  <Users size={20} />
+                </span>
               </div>
               <div className="tableWrap">
-                <table>
+                <table className="dataTable compactTable">
                   <thead>
                     <tr>
                       <th>ชื่อ</th>
@@ -406,7 +475,7 @@ export default function Home() {
                 </table>
               </div>
               <button
-                className="btn"
+                className="btn subtle"
                 onClick={() => {
                   const text = detail.targets
                     .filter((target) => target.status !== "verified")
@@ -421,7 +490,10 @@ export default function Home() {
 
             <div className="panel">
               <div className="panelHeader">
-                <h2>ไฟล์สลิป</h2>
+                <div>
+                  <h2>ไฟล์สลิป</h2>
+                  <p className="muted">เปิดดูผ่าน signed URL และจัดการข้อมูลหลังปิดงาน</p>
+                </div>
                 <div className="actions">
                   <button
                     className="btn danger"
@@ -438,7 +510,7 @@ export default function Home() {
                 </div>
               </div>
               <div className="tableWrap">
-                <table>
+                <table className="dataTable compactTable">
                   <thead>
                     <tr>
                       <th>ชื่อ</th>

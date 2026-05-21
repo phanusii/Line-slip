@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertAdmin } from "@/lib/auth";
+import { formatApiError } from "@/lib/api-error";
 import { createServiceClient } from "@/lib/supabase/server";
 
 const DB_LIMIT_BYTES = 500 * 1024 * 1024;
@@ -82,6 +83,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof Response) return error;
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: formatApiError(error) }, { status: 500 });
   }
 }
