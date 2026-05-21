@@ -1,4 +1,4 @@
-# LINE Slip Admin
+# ระบบจัดการสลิป LINE
 
 ระบบต้นแบบสำหรับรับสลิปจาก LINE, เก็บรูปใน Supabase Storage, เก็บ metadata ใน Supabase Database, ดู usage และล้างข้อมูลสลิปเป็นรายงาน
 
@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-## Admin Access
+## สิทธิ์ผู้ดูแล
 
 API ที่แก้ข้อมูลใช้ header:
 
@@ -21,4 +21,4 @@ API ที่แก้ข้อมูลใช้ header:
 x-admin-secret: ค่า ADMIN_SHARED_SECRET
 ```
 
-หน้าเว็บใช้ prompt ถาม secret เมื่อกดลบ/ดาวน์โหลด/เปิด signed URL
+หน้าเว็บใช้รหัสผู้ดูแลจาก `ADMIN_SHARED_SECRET` สำหรับดู/ดาวน์โหลด/ลบ/แก้สถานะ และรองรับ `VIEWER_SHARED_SECRET` แบบ optional สำหรับสิทธิ์ดูและดาวน์โหลดเท่านั้น

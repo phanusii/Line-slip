@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { formatApiError } from "@/lib/api-error";
 import { actorFromRequest, assertAdmin } from "@/lib/auth";
+import { statusLabels } from "@/lib/status";
 import { createServiceClient } from "@/lib/supabase/server";
 
 export async function GET(
@@ -36,7 +37,7 @@ export async function GET(
     const rows = targets.data.map((target) => [
       target.display_name,
       target.amount_due,
-      target.status,
+      statusLabels[target.status] ?? target.status,
       target.paid_at ?? "",
       target.note ?? ""
     ]);

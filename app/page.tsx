@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { formatBytes, formatMoney } from "@/lib/format";
+import { statusLabels } from "@/lib/status";
 
 type Usage = {
   database: { used_bytes_estimate: number; limit_bytes: number };
@@ -67,17 +68,6 @@ type EventDetail = {
 };
 
 type CleanupMode = "files" | "files_and_metadata" | "event";
-
-const statusLabels: Record<string, string> = {
-  unpaid: "ยังไม่จ่าย",
-  pending_slip: "รอสลิป",
-  verified: "จ่ายแล้ว",
-  manual_review: "รอตรวจ",
-  amount_mismatch: "ยอดไม่ตรง",
-  duplicate_slip: "สลิปซ้ำ",
-  rejected: "ปฏิเสธ",
-  deleted: "ลบแล้ว"
-};
 
 const cleanupModeLabels: Record<CleanupMode, string> = {
   files: "ลบเฉพาะรูปสลิป",
