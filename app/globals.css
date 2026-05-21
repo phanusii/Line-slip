@@ -1,0 +1,293 @@
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --line: #dfe4ea;
+  --text: #17202a;
+  --muted: #657080;
+  --brand: #087a5a;
+  --brand-dark: #065f47;
+  --danger: #c93434;
+  --warn: #b7791f;
+  --ok: #0b7f5d;
+  --shadow: 0 1px 2px rgba(22, 31, 42, 0.06), 0 8px 24px rgba(22, 31, 42, 0.05);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, "Helvetica Neue", sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+a {
+  color: inherit;
+}
+
+.page {
+  min-height: 100vh;
+}
+
+.topbar {
+  align-items: center;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+  padding: 18px 28px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand {
+  display: grid;
+  gap: 4px;
+}
+
+.brand h1 {
+  font-size: 20px;
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.brand p,
+.muted {
+  color: var(--muted);
+  margin: 0;
+}
+
+.secret {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.secret input,
+.modal input,
+.modal textarea {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.main {
+  display: grid;
+  gap: 20px;
+  padding: 24px 28px 48px;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.panelHeader {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.panelHeader h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.stat {
+  display: grid;
+  gap: 8px;
+}
+
+.stat strong {
+  font-size: 28px;
+}
+
+.progress {
+  background: #edf1f4;
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.progress span {
+  background: var(--ok);
+  display: block;
+  height: 100%;
+}
+
+.progress.warn span {
+  background: var(--warn);
+}
+
+.progress.danger span {
+  background: var(--danger);
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  min-width: 920px;
+  width: 100%;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 12px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn {
+  align-items: center;
+  background: #eef3f1;
+  border-radius: 6px;
+  color: var(--brand-dark);
+  display: inline-flex;
+  gap: 6px;
+  min-height: 36px;
+  padding: 8px 11px;
+  text-decoration: none;
+}
+
+.btn.primary {
+  background: var(--brand);
+  color: white;
+}
+
+.btn.danger {
+  background: #fff0f0;
+  color: var(--danger);
+}
+
+.badge {
+  background: #edf1f4;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.badge.ok {
+  background: #e5f6ee;
+  color: var(--ok);
+}
+
+.badge.warn {
+  background: #fff7e5;
+  color: var(--warn);
+}
+
+.badge.danger {
+  background: #fff0f0;
+  color: var(--danger);
+}
+
+.detailGrid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(360px, 1.4fr);
+}
+
+.modalBackdrop {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.42);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 50;
+}
+
+.modal {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  display: grid;
+  gap: 14px;
+  max-width: 520px;
+  padding: 22px;
+  width: 100%;
+}
+
+.modal h3 {
+  margin: 0;
+}
+
+.preview {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-height: 74vh;
+  max-width: min(920px, 96vw);
+  object-fit: contain;
+}
+
+@media (max-width: 880px) {
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 16px;
+  }
+
+  .main {
+    padding: 16px;
+  }
+
+  .detailGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .secret {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
