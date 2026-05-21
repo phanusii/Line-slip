@@ -1,7 +1,7 @@
 export function getEnv(name: string, fallback?: string) {
   const value = process.env[name] ?? fallback;
   if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
+    throw new Error(`ยังไม่ได้ตั้งค่าตัวแปรระบบที่จำเป็น: ${name}`);
   }
   return value;
 }

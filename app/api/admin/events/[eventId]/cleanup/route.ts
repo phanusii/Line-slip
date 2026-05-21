@@ -29,7 +29,7 @@ export async function POST(
 
     if (!body.confirmName || body.confirmName !== event.name) {
       return NextResponse.json(
-        { error: "Confirmation name does not match event name." },
+        { error: "ชื่องานที่พิมพ์ยืนยันไม่ตรงกับชื่องานจริง" },
         { status: 400 }
       );
     }

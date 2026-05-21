@@ -76,7 +76,7 @@ export async function uploadSlipImage(input: UploadSlipInput) {
 
 export async function downloadLineContent(messageId: string) {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!token) throw new Error("Missing LINE_CHANNEL_ACCESS_TOKEN");
+  if (!token) throw new Error("ยังไม่ได้ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN");
 
   const response = await fetch(
     `https://api-data.line.me/v2/bot/message/${messageId}/content`,
@@ -88,7 +88,7 @@ export async function downloadLineContent(messageId: string) {
   );
 
   if (!response.ok) {
-    throw new Error(`LINE content download failed: ${response.status}`);
+    throw new Error(`ดาวน์โหลดรูปจาก LINE ไม่สำเร็จ: ${response.status}`);
   }
 
   const arrayBuffer = await response.arrayBuffer();

@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "LINE Slip Admin",
-  description: "Admin dashboard for LINE slip storage and cleanup"
+  title: "ระบบจัดการสลิป LINE",
+  description: "แดชบอร์ดจัดเก็บสลิป LINE ด้วย Supabase"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -19,7 +19,7 @@ export async function POST(
 
     if (error) throw error;
     if (!slip.storage_path) {
-      return NextResponse.json({ error: "Slip file has been deleted." }, { status: 404 });
+      return NextResponse.json({ error: "ไฟล์สลิปนี้ถูกลบแล้ว" }, { status: 404 });
     }
 
     const signed = await supabase.storage

@@ -64,6 +64,23 @@ type EventDetail = {
 
 type CleanupMode = "files" | "files_and_metadata" | "event";
 
+const statusLabels: Record<string, string> = {
+  unpaid: "ยังไม่จ่าย",
+  pending_slip: "รอสลิป",
+  verified: "จ่ายแล้ว",
+  manual_review: "รอตรวจ",
+  amount_mismatch: "ยอดไม่ตรง",
+  duplicate_slip: "สลิปซ้ำ",
+  rejected: "ปฏิเสธ",
+  deleted: "ลบแล้ว"
+};
+
+const cleanupModeLabels: Record<CleanupMode, string> = {
+  files: "ลบเฉพาะรูปสลิป",
+  files_and_metadata: "ลบรูปและข้อมูลสลิป",
+  event: "ปิดงานและล้างข้อมูล"
+};
+
 function percent(used: number, limit: number) {
   return Math.min(100, Math.round((used / limit) * 100));
 }
@@ -85,7 +102,15 @@ async function api<T>(path: string, secret: string, init?: RequestInit): Promise
   });
 
   if (!response.ok) {
-    throw new Error(await response.text());
+    const text = await response.text();
+    let message = text;
+    try {
+      const parsed = JSON.parse(text) as { error?: string };
+      message = parsed.error ?? text;
+    } catch {
+      message = text.startsWith("{") ? "เกิดข้อผิดพลาดในการเชื่อมต่อระบบ" : text;
+    }
+    throw new Error(message || "เกิดข้อผิดพลาดในการเชื่อมต่อระบบ");
   }
 
   return response.json() as Promise<T>;
@@ -158,7 +183,7 @@ export default function Home() {
         body: JSON.stringify({
           mode: cleanup.mode,
           confirmName,
-          reason: "Admin cleanup from dashboard"
+          reason: "ล้างข้อมูลจากแดชบอร์ดผู้ดูแล"
         })
       });
       setCleanup(null);
@@ -189,7 +214,7 @@ export default function Home() {
         const a = document.createElement("a");
         a.href = objectUrl;
         const disposition = response.headers.get("content-disposition") ?? "";
-        a.download = disposition.match(/filename="([^"]+)"/)?.[1] ?? "download";
+        a.download = disposition.match(/filename="([^"]+)"/)?.[1] ?? "ดาวน์โหลด";
         a.click();
         URL.revokeObjectURL(objectUrl);
       })
@@ -203,13 +228,14 @@ export default function Home() {
     <div className="page">
       <header className="topbar">
         <div className="brand">
-          <h1>LINE Slip Admin</h1>
-          <p>Supabase Storage + Database usage, slip files, cleanup และรายชื่อยังไม่จ่าย</p>
+          <span className="brandKicker">ระบบจัดการสลิป LINE</span>
+          <h1>แดชบอร์ดรับสลิปและติดตามยอดโอน</h1>
+          <p>ดูพื้นที่จัดเก็บ ตรวจรายการจ่ายเงิน ดาวน์โหลดหลักฐาน และล้างข้อมูลหลังปิดงาน</p>
         </div>
         <div className="secret">
           <input
-            aria-label="Admin secret"
-            placeholder="ADMIN_SHARED_SECRET"
+            aria-label="รหัสผู้ดูแล"
+            placeholder="รหัสผู้ดูแล"
             type="password"
             value={secret}
             onChange={(event) => setSecret(event.target.value)}
@@ -224,15 +250,15 @@ export default function Home() {
       <main className="main">
         {error ? (
           <section className="panel">
-            <span className="badge danger">Error</span>
+            <span className="badge danger">ข้อผิดพลาด</span>
             <p>{error}</p>
           </section>
         ) : null}
 
         <section className="grid">
-          <div className="panel stat">
+          <div className="panel stat accentMint">
             <div className="panelHeader">
-              <h2>Storage</h2>
+              <h2>พื้นที่เก็บไฟล์</h2>
               <HardDrive size={20} />
             </div>
             <strong>{usage ? formatBytes(usage.storage.used_bytes) : "-"}</strong>
@@ -245,14 +271,14 @@ export default function Home() {
             {storagePct >= 70 ? <span className="badge warn">ใกล้เต็ม {storagePct}%</span> : null}
           </div>
 
-          <div className="panel stat">
+          <div className="panel stat accentSky">
             <div className="panelHeader">
-              <h2>Database</h2>
+              <h2>ฐานข้อมูล</h2>
               <Archive size={20} />
             </div>
             <strong>{usage ? formatBytes(usage.database.used_bytes_estimate) : "-"}</strong>
             <p className="muted">
-              estimate จาก rows ที่ใช้ใน dashboard · limit {usage ? formatBytes(usage.database.limit_bytes) : "-"}
+              ประมาณจากข้อมูลที่ใช้ในแดชบอร์ด · ขีดจำกัด {usage ? formatBytes(usage.database.limit_bytes) : "-"}
             </p>
             <div className={`progress ${toneClass(dbPct)}`}>
               <span style={{ width: `${dbPct}%` }} />
@@ -260,9 +286,9 @@ export default function Home() {
             {dbPct >= 70 ? <span className="badge warn">ใกล้เต็ม {dbPct}%</span> : null}
           </div>
 
-          <div className="panel stat">
+          <div className="panel stat accentPink">
             <div className="panelHeader">
-              <h2>Top Usage</h2>
+              <h2>ใช้งานสูงสุด</h2>
               <AlertTriangle size={20} />
             </div>
             <strong>{usage?.events[0]?.event_name ?? "-"}</strong>
@@ -319,7 +345,7 @@ export default function Home() {
                           }
                         >
                           <FileSpreadsheet size={15} />
-                          CSV
+                          ไฟล์สรุป
                         </button>
                         <button
                           className="btn"
@@ -328,7 +354,7 @@ export default function Home() {
                           }
                         >
                           <Download size={15} />
-                          ZIP
+                          ดาวน์โหลดสลิป
                         </button>
                         <button
                           className="btn danger"
@@ -370,7 +396,9 @@ export default function Home() {
                           <td>{target.display_name}</td>
                           <td>{formatMoney(target.amount_due)}</td>
                           <td>
-                            <span className="badge warn">{target.status}</span>
+                            <span className="badge warn">
+                              {statusLabels[target.status] ?? target.status}
+                            </span>
                           </td>
                         </tr>
                       ))}
@@ -399,7 +427,7 @@ export default function Home() {
                     className="btn danger"
                     onClick={() => setCleanup({ mode: "files_and_metadata", event: selectedEvent })}
                   >
-                    ลบรูป + metadata
+                    ลบรูปและข้อมูลสลิป
                   </button>
                   <button
                     className="btn danger"
@@ -426,7 +454,7 @@ export default function Home() {
                       <tr key={slip.id}>
                         <td>{slip.payment_targets?.display_name ?? "-"}</td>
                         <td>
-                          <span className="badge">{slip.status}</span>
+                          <span className="badge">{statusLabels[slip.status] ?? slip.status}</span>
                         </td>
                         <td>{formatMoney(slip.amount_expected)}</td>
                         <td>{formatBytes(slip.file_size)}</td>
@@ -456,11 +484,11 @@ export default function Home() {
           <div className="modal">
             <h3>ยืนยันการล้างข้อมูล</h3>
             <p>
-              โหมด: <strong>{cleanup.mode}</strong>
+              โหมด: <strong>{cleanupModeLabels[cleanup.mode]}</strong>
               <br />
               งาน: <strong>{cleanup.event.name}</strong>
             </p>
-            <p className="muted">พิมพ์ชื่องานให้ตรงเพื่อยืนยัน การกระทำนี้จะถูกบันทึก audit log</p>
+            <p className="muted">พิมพ์ชื่องานให้ตรงเพื่อยืนยัน การกระทำนี้จะถูกบันทึกประวัติผู้ดูแล</p>
             <input
               value={confirmName}
               onChange={(event) => setConfirmName(event.target.value)}
@@ -485,7 +513,7 @@ export default function Home() {
       {previewUrl ? (
         <div className="modalBackdrop" onClick={() => setPreviewUrl(null)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="preview" src={previewUrl} alt="Slip preview" />
+          <img className="preview" src={previewUrl} alt="ตัวอย่างสลิป" />
         </div>
       ) : null}
     </div>

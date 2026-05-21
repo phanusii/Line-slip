@@ -6,7 +6,7 @@ export function assertAdmin(request: NextRequest) {
   if (!configured || configured === "change-me") {
     throw new Response(
       JSON.stringify({
-        error: "Set ADMIN_SHARED_SECRET before using admin APIs."
+        error: "กรุณาตั้งค่า ADMIN_SHARED_SECRET ก่อนใช้งาน API ผู้ดูแล"
       }),
       { status: 500, headers: { "content-type": "application/json" } }
     );
@@ -14,7 +14,7 @@ export function assertAdmin(request: NextRequest) {
 
   const provided = request.headers.get("x-admin-secret");
   if (provided !== configured) {
-    throw new Response(JSON.stringify({ error: "Unauthorized" }), {
+    throw new Response(JSON.stringify({ error: "รหัสผู้ดูแลไม่ถูกต้อง" }), {
       status: 401,
       headers: { "content-type": "application/json" }
     });
