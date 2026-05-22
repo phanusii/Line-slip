@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { downloadLineContent, uploadSlipImage } from "@/lib/slips";
-import { replyLine, verifyLineSignature } from "@/lib/line";
+import { lineMenuMessages, replyLine, verifyLineSignature } from "@/lib/line";
 
 type LineEvent = {
   type: string;
@@ -22,13 +22,36 @@ export async function POST(request: NextRequest) {
 
   for (const event of payload.events) {
     if (event.type === "follow" && event.replyToken) {
-      await replyLine(event.replyToken, [
-        { type: "text", text: "ส่งสลิปเข้ามาได้เลย หรือเลือกงานและรายชื่อเพื่อรับ QR Code ก่อนโอน" }
-      ]);
+      if (event.source?.userId) {
+        await supabase
+          .from("line_users")
+          .upsert(
+            {
+              line_user_id: event.source.userId,
+              last_seen_at: new Date().toISOString()
+            },
+            { onConflict: "line_user_id" }
+          );
+      }
+
+      await replyLine(
+        event.replyToken,
+        lineMenuMessages("ยินดีต้อนรับค่ะ กดปุ่มด้านล่างเพื่อเลือกงานและรับ QR Code ก่อนโอนเงิน")
+      );
       continue;
     }
 
-    if (event.type !== "message" || event.message?.type !== "image" || !event.message.id) {
+    if (event.type !== "message") {
+      continue;
+    }
+
+    if (event.message?.type !== "image" || !event.message.id) {
+      if (event.replyToken) {
+        await replyLine(
+          event.replyToken,
+          lineMenuMessages("กรุณากดเลือกงานก่อนโอนเงิน หรือกดดูข้อมูลของฉันเพื่อตรวจสถานะ")
+        );
+      }
       continue;
     }
 
@@ -54,9 +77,10 @@ export async function POST(request: NextRequest) {
 
     if (!activeSelection?.data) {
       if (event.replyToken) {
-        await replyLine(event.replyToken, [
-          { type: "text", text: "ยังไม่พบรายชื่อที่เลือกไว้ กรุณาเลือกงานและรายชื่อก่อนส่งสลิป" }
-        ]);
+        await replyLine(
+          event.replyToken,
+          lineMenuMessages("ยังไม่พบรายชื่อที่เลือกไว้ กรุณากดเลือกงานและรายชื่อก่อนส่งสลิป")
+        );
       }
       continue;
     }
