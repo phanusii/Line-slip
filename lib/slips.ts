@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { STORAGE_BUCKET } from "@/lib/env";
-import { safeFilePart } from "@/lib/format";
 import { createServiceClient } from "@/lib/supabase/server";
 
 type UploadSlipInput = {
@@ -33,9 +32,12 @@ export async function uploadSlipImage(input: UploadSlipInput) {
   const imageHash = hashImage(normalized);
   const now = new Date();
   const datePart = now.toISOString().replace(/[:.]/g, "-");
-  const person = safeFilePart(input.personName ?? "unknown");
+  const targetSegment = input.paymentTargetId ?? "no-target";
   const amount = Number(input.amountExpected ?? 0).toFixed(2);
-  const path = `events/${input.eventId}/manual_review/${person}_${amount}_${datePart}_${imageHash.slice(0, 12)}.jpg`;
+  // Use payment_target_id (UUID) instead of person name — avoids Thai-character URL encoding issues
+  const path = `events/${input.eventId}/manual_review/${targetSegment}_${amount}_${datePart}_${imageHash.slice(0, 12)}.jpg`;
+  // Human-readable name kept only for download Content-Disposition
+  const originalFilename = `${input.personName ?? "unknown"}_${amount}.jpg`;
 
   const uploaded = await supabase.storage
     .from(STORAGE_BUCKET)
@@ -56,7 +58,7 @@ export async function uploadSlipImage(input: UploadSlipInput) {
       line_message_id: input.lineMessageId ?? null,
       storage_bucket: STORAGE_BUCKET,
       storage_path: path,
-      original_filename: `${person}_${amount}.jpg`,
+      original_filename: originalFilename,
       file_size: normalized.byteLength,
       mime_type: "image/jpeg",
       image_hash: imageHash,

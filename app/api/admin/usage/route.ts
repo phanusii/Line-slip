@@ -11,20 +11,19 @@ export async function GET(request: NextRequest) {
     assertAdmin(request, "viewer");
     const supabase = createServiceClient();
 
-    const [slips, targets, events] = await Promise.all([
+    const [slips, events, dbSize] = await Promise.all([
       supabase
         .from("slip_submissions")
         .select("event_id,file_size,status,storage_path,file_deleted_at,metadata_deleted_at,events(name,slug)")
         .is("metadata_deleted_at", null),
-      supabase.from("payment_targets").select("id"),
       supabase
         .from("events")
         .select("id,name,slug,is_open,archived_at,expected_total")
-        .is("archived_at", null)
+        .is("archived_at", null),
+      supabase.rpc("get_db_size")
     ]);
 
     if (slips.error) throw slips.error;
-    if (targets.error) throw targets.error;
     if (events.error) throw events.error;
 
     const storageUsed = slips.data
@@ -67,14 +66,11 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const dbEstimate =
-      JSON.stringify(events.data).length +
-      JSON.stringify(targets.data).length +
-      JSON.stringify(slips.data).length;
+    const dbUsedBytes = Number(dbSize.data ?? 0);
 
     return NextResponse.json({
       database: {
-        used_bytes_estimate: dbEstimate,
+        used_bytes: dbUsedBytes,
         limit_bytes: DB_LIMIT_BYTES
       },
       storage: {

@@ -86,6 +86,23 @@ export async function POST(request: NextRequest) {
     }
 
     try {
+      // Rate limit: max 10 slip submissions per LINE user per hour
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { count: recentCount } = await supabase
+        .from("slip_submissions")
+        .select("id", { count: "exact", head: true })
+        .eq("line_user_id", user?.data?.id ?? "")
+        .gte("created_at", oneHourAgo);
+
+      if ((recentCount ?? 0) >= 10) {
+        if (event.replyToken) {
+          await replyLine(event.replyToken, [
+            { type: "text", text: "ส่งสลิปเกินจำนวนที่อนุญาต กรุณารอสักครู่แล้วส่งใหม่ภายหลัง" }
+          ]);
+        }
+        continue;
+      }
+
       const content = await downloadLineContent(event.message.id);
       const eventRow = Array.isArray(activeSelection.data.events)
         ? activeSelection.data.events[0]

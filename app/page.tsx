@@ -24,7 +24,7 @@ import { statusLabels } from "@/lib/status";
 import { RichMenuBuilder } from "@/components/RichMenuBuilder";
 
 type Usage = {
-  database: { used_bytes_estimate: number; limit_bytes: number };
+  database: { used_bytes: number; limit_bytes: number };
   storage: { used_bytes: number; limit_bytes: number; file_count: number };
   events: Array<{
     event_id: string;
@@ -89,8 +89,16 @@ function percent(used: number, limit: number) {
 
 function toneClass(value: number) {
   if (value >= 95) return "danger";
+  if (value >= 85) return "danger";
   if (value >= 70) return "warn";
   return "";
+}
+
+function usageBadge(pct: number) {
+  if (pct >= 95) return <span className="badge danger">เต็มวิกฤต {pct}%</span>;
+  if (pct >= 85) return <span className="badge danger">ใกล้เต็มมาก {pct}%</span>;
+  if (pct >= 70) return <span className="badge warn">ใกล้เต็ม {pct}%</span>;
+  return null;
 }
 
 type AuthUser = {
@@ -342,7 +350,7 @@ export default function Home() {
   }
 
   const storagePct = usage ? percent(usage.storage.used_bytes, usage.storage.limit_bytes) : 0;
-  const dbPct = usage ? percent(usage.database.used_bytes_estimate, usage.database.limit_bytes) : 0;
+  const dbPct = usage ? percent(usage.database.used_bytes, usage.database.limit_bytes) : 0;
   const paidCount = events.reduce((sum, event) => sum + event.paid_count, 0);
   const unpaidCount = events.reduce((sum, event) => sum + event.unpaid_count, 0);
   const totalDue = events.reduce((sum, event) => sum + Number(event.expected_total ?? 0), 0);
@@ -508,7 +516,7 @@ export default function Home() {
             <div className={`progress ${toneClass(storagePct)}`}>
               <span style={{ width: `${storagePct}%` }} />
             </div>
-            {storagePct >= 70 ? <span className="badge warn">ใกล้เต็ม {storagePct}%</span> : null}
+            {usageBadge(storagePct)}
           </div>
 
           <div className="panel stat accentSky">
@@ -516,14 +524,14 @@ export default function Home() {
               <h2>ฐานข้อมูล</h2>
               <Archive size={20} />
             </div>
-            <strong>{usage ? formatBytes(usage.database.used_bytes_estimate) : "-"}</strong>
+            <strong>{usage ? formatBytes(usage.database.used_bytes) : "-"}</strong>
             <p className="muted">
-              ประมาณจากข้อมูลที่ใช้ในแดชบอร์ด · ขีดจำกัด {usage ? formatBytes(usage.database.limit_bytes) : "-"}
+              ขนาดจริงจาก pg_database_size · ขีดจำกัด {usage ? formatBytes(usage.database.limit_bytes) : "-"}
             </p>
             <div className={`progress ${toneClass(dbPct)}`}>
               <span style={{ width: `${dbPct}%` }} />
             </div>
-            {dbPct >= 70 ? <span className="badge warn">ใกล้เต็ม {dbPct}%</span> : null}
+            {usageBadge(dbPct)}
           </div>
 
           <div className="panel stat accentPink">

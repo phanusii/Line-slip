@@ -141,6 +141,24 @@ export function verifyAdminCredentials(email: string, password: string) {
   };
 }
 
+export async function verifyAdminCredentialsFromDb(
+  supabase: ReturnType<typeof import("@/lib/supabase/server").createServiceClient>,
+  email: string,
+  password: string
+): Promise<{ email: string; role: Role } | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const { data } = await supabase
+    .from("admin_users")
+    .select("email,role,password_hash")
+    .eq("email", normalizedEmail)
+    .single();
+
+  if (!data || !data.password_hash) return null;
+  if (!verifyPassword(password, data.password_hash)) return null;
+
+  return { email: data.email as string, role: data.role as Role };
+}
+
 export function assertAdmin(request: NextRequest, requiredRole: Role = "admin") {
   const session = getAdminSession(request);
 

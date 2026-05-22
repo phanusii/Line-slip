@@ -77,6 +77,7 @@ create table public.admin_users (
   id uuid primary key default gen_random_uuid(),
   email text not null unique,
   role public.admin_role not null default 'viewer',
+  password_hash text not null,
   created_at timestamptz not null default now()
 );
 
@@ -178,3 +179,15 @@ create policy "service role storage access"
 on storage.objects for all
 using (bucket_id = 'slips' and auth.role() = 'service_role')
 with check (bucket_id = 'slips' and auth.role() = 'service_role');
+
+-- Returns actual PostgreSQL database size in bytes (accurate, includes indexes and TOAST)
+create or replace function public.get_db_size()
+returns bigint
+language sql
+security definer
+set search_path = public
+as $$
+  select pg_database_size(current_database());
+$$;
+
+grant execute on function public.get_db_size() to service_role;
