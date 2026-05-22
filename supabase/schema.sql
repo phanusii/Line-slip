@@ -180,6 +180,19 @@ on storage.objects for all
 using (bucket_id = 'slips' and auth.role() = 'service_role')
 with check (bucket_id = 'slips' and auth.role() = 'service_role');
 
+create table public.settings (
+  key text primary key,
+  value text not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.settings enable row level security;
+
+create policy "admin service access settings"
+on public.settings for all
+using (auth.role() = 'service_role')
+with check (auth.role() = 'service_role');
+
 -- Returns actual PostgreSQL database size in bytes (accurate, includes indexes and TOAST)
 create or replace function public.get_db_size()
 returns bigint

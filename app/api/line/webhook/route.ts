@@ -1,13 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { downloadLineContent, uploadSlipImage } from "@/lib/slips";
-import { lineMenuMessages, replyLine, verifyLineSignature } from "@/lib/line";
+import {
+  buildCheckStatusFlex,
+  buildVerifiedStatusFlex,
+  lineMenuMessages,
+  liffUri,
+  replyLine,
+  verifyLineSignature
+} from "@/lib/line";
 
 type LineEvent = {
   type: string;
   replyToken?: string;
   source?: { userId?: string };
   message?: { id: string; type: string };
+  postback?: { data: string; displayText?: string };
 };
 
 export async function POST(request: NextRequest) {
@@ -38,6 +46,45 @@ export async function POST(request: NextRequest) {
         event.replyToken,
         lineMenuMessages("ยินดีต้อนรับค่ะ กดปุ่มด้านล่างเพื่อเลือกงานและรับ QR Code ก่อนโอนเงิน")
       );
+      continue;
+    }
+
+    if (event.type === "postback" && event.postback?.data === "action=check_status") {
+      const lineUserId = event.source?.userId;
+      if (lineUserId && event.replyToken) {
+        const { data: lineUser } = await supabase
+          .from("line_users")
+          .select("id")
+          .eq("line_user_id", lineUserId)
+          .single();
+
+        const verifiedTarget = lineUser
+          ? await supabase
+              .from("payment_targets")
+              .select("display_name,amount_due,paid_at,events(name)")
+              .eq("selected_line_user_id", lineUser.id)
+              .eq("status", "verified")
+              .order("paid_at", { ascending: false })
+              .limit(1)
+              .single()
+          : null;
+
+        if (verifiedTarget?.data) {
+          const t = verifiedTarget.data;
+          const ev = t.events as { name?: string } | Array<{ name?: string }> | null;
+          const eventName = Array.isArray(ev) ? ev[0]?.name : ev?.name;
+          await replyLine(event.replyToken, [
+            buildVerifiedStatusFlex({
+              displayName: t.display_name,
+              eventName: eventName ?? "",
+              amountDue: Number(t.amount_due),
+              paidAt: t.paid_at ?? null
+            })
+          ]);
+        } else {
+          await replyLine(event.replyToken, [buildCheckStatusFlex(liffUri("me"))]);
+        }
+      }
       continue;
     }
 

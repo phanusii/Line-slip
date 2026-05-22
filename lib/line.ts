@@ -69,3 +69,100 @@ export async function replyLine(replyToken: string, messages: unknown[]) {
     body: JSON.stringify({ replyToken, messages })
   });
 }
+
+export async function pushLine(lineUserId: string, messages: unknown[]) {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) return;
+
+  await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ to: lineUserId, messages })
+  });
+}
+
+export function buildVerifiedStatusFlex(opts: {
+  displayName: string;
+  eventName: string;
+  amountDue: number;
+  paidAt: string | null;
+}) {
+  const dateStr = opts.paidAt
+    ? new Date(opts.paidAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })
+    : null;
+
+  return {
+    type: "flex",
+    altText: `✅ ชำระเงินแล้ว — ${opts.displayName}`,
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#16a34a",
+        paddingAll: "20px",
+        contents: [
+          { type: "text", text: "✅ ชำระเงินแล้ว", color: "#ffffff", weight: "bold", size: "xl" }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        contents: [
+          { type: "text", text: opts.displayName, weight: "bold", size: "lg" },
+          { type: "text", text: opts.eventName, color: "#888888", size: "sm" },
+          { type: "separator", margin: "md" },
+          {
+            type: "box", layout: "horizontal", margin: "md",
+            contents: [
+              { type: "text", text: "ยอดเงิน", flex: 1, color: "#555555", size: "sm" },
+              { type: "text", text: `${Number(opts.amountDue).toLocaleString("th-TH")} บาท`, flex: 1, align: "end", weight: "bold", size: "sm" }
+            ]
+          },
+          ...(dateStr ? [{
+            type: "box", layout: "horizontal",
+            contents: [
+              { type: "text", text: "วันที่", flex: 1, color: "#555555", size: "sm" },
+              { type: "text", text: dateStr, flex: 1, align: "end", size: "sm" }
+            ]
+          }] : [])
+        ]
+      }
+    }
+  };
+}
+
+export function buildCheckStatusFlex(liffMeUrl: string) {
+  return {
+    type: "flex",
+    altText: "ดูสถานะการชำระเงิน",
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "md",
+        contents: [
+          { type: "text", text: "📋 ตรวจสอบสถานะ", weight: "bold", size: "lg" },
+          { type: "text", text: "กดปุ่มด้านล่างเพื่อเลือกชื่อและดูสถานะการชำระเงิน", color: "#888888", size: "sm", wrap: true }
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#2563eb",
+            action: { type: "uri", label: "ดูสถานะของฉัน", uri: liffMeUrl }
+          }
+        ]
+      }
+    }
+  };
+}

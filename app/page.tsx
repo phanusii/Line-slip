@@ -157,6 +157,9 @@ export default function Home() {
   const [newPromptpayId, setNewPromptpayId] = useState("");
   const [newDefaultAmount, setNewDefaultAmount] = useState("");
   const [newTargetsText, setNewTargetsText] = useState(exampleTargetsText);
+  const [contactUrl, setContactUrl] = useState("");
+  const [contactUrlSaved, setContactUrlSaved] = useState(false);
+  const [compactMenuPublished, setCompactMenuPublished] = useState(false);
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -175,7 +178,7 @@ export default function Home() {
       if (!response.ok) return;
       const data = (await response.json()) as { user: AuthUser };
       setAdminUser(data.user);
-      await loadAll(true);
+      await Promise.all([loadAll(true), loadSettings()]);
     } catch {
       setAdminUser(null);
     } finally {
@@ -197,7 +200,7 @@ export default function Home() {
       if (!response.ok) throw new Error(data.error ?? "เข้าสู่ระบบไม่สำเร็จ");
       setAdminUser(data.user ?? null);
       setPassword("");
-      await loadAll(true);
+      await Promise.all([loadAll(true), loadSettings()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -213,6 +216,46 @@ export default function Home() {
     setDetail(null);
     setSelectedEventId(null);
     setPassword("");
+  }
+
+  async function loadSettings() {
+    try {
+      const { settings } = await api<{ settings: Record<string, string> }>("/api/admin/settings");
+      setContactUrl(settings.contact_url ?? "");
+    } catch {
+      // non-critical
+    }
+  }
+
+  async function saveContactUrl() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/api/admin/settings", {
+        method: "POST",
+        body: JSON.stringify({ contact_url: contactUrl })
+      });
+      setContactUrlSaved(true);
+      setTimeout(() => setContactUrlSaved(false), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publishCompactMenu() {
+    setBusy(true);
+    setError(null);
+    setCompactMenuPublished(false);
+    try {
+      await api("/api/admin/rich-menu/compact", { method: "POST", body: "{}" });
+      setCompactMenuPublished(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function loadAll(force = false) {
@@ -837,6 +880,48 @@ export default function Home() {
             </div>
             <span className="badge ok">พร้อมใช้งาน Webhook</span>
           </div>
+
+          <div className="setupCard" style={{ marginBottom: "1.5rem" }}>
+            <span className="setupLabel">Rich Menu Compact 3 ปุ่ม (โอนเงิน · สถานะ · ติดต่อ)</span>
+            <p className="muted" style={{ marginBottom: "0.75rem" }}>
+              สร้างและเผยแพร่เมนูแถบบาง 3 ปุ่มโดยอัตโนมัติ ไม่ต้องอัปโหลดรูป
+              ปุ่มติดต่อจะใช้ URL ที่ตั้งด้านล่าง
+            </p>
+            <div className="actions">
+              <button
+                className="btn primary"
+                disabled={!adminUser || adminUser.role !== "admin" || busy}
+                onClick={publishCompactMenu}
+              >
+                {busy ? "กำลังสร้าง…" : "🚀 สร้าง Rich Menu Compact"}
+              </button>
+              {compactMenuPublished ? <span className="badge ok">เผยแพร่แล้ว ✓</span> : null}
+            </div>
+          </div>
+
+          <div className="setupCard" style={{ marginBottom: "1.5rem" }}>
+            <span className="setupLabel">ลิงก์ปุ่มติดต่อ</span>
+            <p className="muted" style={{ marginBottom: "0.5rem" }}>
+              URL ที่เปิดเมื่อ user กดปุ่ม &quot;ติดต่อ&quot; เช่น LINE OA, Facebook, Google Form
+            </p>
+            <div className="actions">
+              <input
+                type="url"
+                value={contactUrl}
+                onChange={(e) => setContactUrl(e.target.value)}
+                placeholder="https://line.me/ti/p/~your_oa_id"
+                style={{ flex: 1, minWidth: 0 }}
+              />
+              <button
+                className="btn subtle"
+                disabled={!adminUser || adminUser.role !== "admin" || busy}
+                onClick={saveContactUrl}
+              >
+                {contactUrlSaved ? "บันทึกแล้ว ✓" : "บันทึก"}
+              </button>
+            </div>
+          </div>
+
           <div className="lineGrid">
             <div className="setupCard">
               <span className="setupLabel">Webhook URL</span>
@@ -877,7 +962,8 @@ export default function Home() {
               <span className="setupLabel">วิธีทดสอบ</span>
               <p className="muted">
                 หลังใส่ค่า LINE แล้ว ให้สร้าง LIFF app โดยใช้ Endpoint URL นี้,
-                นำ LIFF URL ไปผูกกับ Rich Menu, เพิ่ม LINE OA เป็นเพื่อน แล้วเลือกชื่อก่อนส่งสลิป
+                กด &quot;สร้าง Rich Menu Compact&quot; เพื่อเผยแพร่เมนู,
+                เพิ่ม LINE OA เป็นเพื่อน แล้วเลือกชื่อก่อนส่งสลิป
               </p>
             </div>
           </div>
