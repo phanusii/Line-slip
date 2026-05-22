@@ -106,10 +106,12 @@ export async function generateCompactMenuImage(): Promise<Buffer> {
   const cx3 = Math.round(COL * 2 + COL / 2);  // 2083
 
   // Vertical rhythm: icon centre → title → subtitle
-  const ICY    = 78;   // icon circle centre-y
-  const ICR    = 44;   // icon circle radius
-  const TITLE_Y = 163; // bold label baseline
-  const SUB_Y   = 206; // subtitle baseline
+  // Font sizes must be large enough to remain legible when the
+  // 2500×270 image is scaled down to ~42 logical-px height on phone.
+  const ICY    = 62;   // icon circle centre-y (smaller → more room for text)
+  const ICR    = 36;   // icon circle radius
+  const TITLE_Y = 158; // bold label baseline  (font 84 px → ~13 px on screen)
+  const SUB_Y   = 220; // subtitle baseline    (font 58 px → ~9 px on screen)
 
   const F = "Arial,Helvetica,sans-serif";
 
@@ -168,39 +170,41 @@ export async function generateCompactMenuImage(): Promise<Buffer> {
          ICON 1 — โอนเงิน  (฿ in halo)
          ══════════════════════════════════════════ -->
     <circle cx="${cx1}" cy="${ICY}" r="${ICR}" fill="white" opacity="0.18"/>
-    <circle cx="${cx1}" cy="${ICY}" r="${ICR}" fill="none" stroke="white" stroke-width="2.5" opacity="0.45"/>
-    <text x="${cx1}" y="${ICY + 20}" text-anchor="middle"
-          font-size="58" font-weight="900" fill="white" font-family="${F}">&#x0E3F;</text>
+    <circle cx="${cx1}" cy="${ICY}" r="${ICR}" fill="none" stroke="white" stroke-width="2" opacity="0.45"/>
+    <text x="${cx1}" y="${ICY + 14}" text-anchor="middle"
+          font-size="44" font-weight="900" fill="white" font-family="${F}">&#x0E3F;</text>
 
     <!-- ══════════════════════════════════════════
          ICON 2 — สถานะ  (3-bar chart)
          ══════════════════════════════════════════ -->
     <circle cx="${cx2}" cy="${ICY}" r="${ICR}" fill="white" opacity="0.18"/>
-    <circle cx="${cx2}" cy="${ICY}" r="${ICR}" fill="none" stroke="white" stroke-width="2.5" opacity="0.45"/>
-    <rect x="${cx2 - 34}" y="${ICY - 13}" width="17" height="28" rx="4" fill="white"/>
-    <rect x="${cx2 - 9}"  y="${ICY - 27}" width="17" height="42" rx="4" fill="white"/>
-    <rect x="${cx2 + 16}" y="${ICY - 41}" width="17" height="56" rx="4" fill="white"/>
+    <circle cx="${cx2}" cy="${ICY}" r="${ICR}" fill="none" stroke="white" stroke-width="2" opacity="0.45"/>
+    <!-- bars bottom-aligned at ICY+14, heights 22/34/46 -->
+    <rect x="${cx2 - 27}" y="${ICY - 8}"  width="14" height="22" rx="3" fill="white"/>
+    <rect x="${cx2 - 7}"  y="${ICY - 20}" width="14" height="34" rx="3" fill="white"/>
+    <rect x="${cx2 + 13}" y="${ICY - 32}" width="14" height="46" rx="3" fill="white"/>
 
     <!-- ══════════════════════════════════════════
          ICON 3 — ติดต่อ  (speech bubble)
          ══════════════════════════════════════════ -->
     <circle cx="${cx3}" cy="${ICY}" r="${ICR}" fill="white" opacity="0.18"/>
-    <circle cx="${cx3}" cy="${ICY}" r="${ICR}" fill="none" stroke="white" stroke-width="2.5" opacity="0.45"/>
-    <rect x="${cx3 - 32}" y="${ICY - 22}" width="64" height="40" rx="10" fill="white"/>
-    <path d="M${cx3 - 14},${ICY + 18} L${cx3 - 26},${ICY + 34} L${cx3 + 4},${ICY + 18} Z" fill="white"/>
-    <circle cx="${cx3 - 14}" cy="${ICY - 2}" r="5" fill="#6d28d9"/>
-    <circle cx="${cx3}"       cy="${ICY - 2}" r="5" fill="#6d28d9"/>
-    <circle cx="${cx3 + 14}"  cy="${ICY - 2}" r="5" fill="#6d28d9"/>
+    <circle cx="${cx3}" cy="${ICY}" r="${ICR}" fill="none" stroke="white" stroke-width="2" opacity="0.45"/>
+    <!-- bubble fits inside circle (cy=62, r=36 → y: 26–98) -->
+    <rect x="${cx3 - 26}" y="${ICY - 16}" width="52" height="32" rx="8" fill="white"/>
+    <path d="M${cx3 - 10},${ICY + 16} L${cx3 - 20},${ICY + 30} L${cx3 + 4},${ICY + 16} Z" fill="white"/>
+    <circle cx="${cx3 - 10}" cy="${ICY}"      r="4" fill="#6d28d9"/>
+    <circle cx="${cx3}"       cy="${ICY}"      r="4" fill="#6d28d9"/>
+    <circle cx="${cx3 + 10}"  cy="${ICY}"      r="4" fill="#6d28d9"/>
 
     <!-- ── Main titles ── -->
-    <text x="${cx1}" y="${TITLE_Y}" text-anchor="middle" font-size="48" font-weight="bold" fill="white" font-family="${F}">${T_TRANSFER}</text>
-    <text x="${cx2}" y="${TITLE_Y}" text-anchor="middle" font-size="48" font-weight="bold" fill="white" font-family="${F}">${T_STATUS}</text>
-    <text x="${cx3}" y="${TITLE_Y}" text-anchor="middle" font-size="48" font-weight="bold" fill="white" font-family="${F}">${T_CONTACT}</text>
+    <text x="${cx1}" y="${TITLE_Y}" text-anchor="middle" font-size="84" font-weight="bold" fill="white" font-family="${F}">${T_TRANSFER}</text>
+    <text x="${cx2}" y="${TITLE_Y}" text-anchor="middle" font-size="84" font-weight="bold" fill="white" font-family="${F}">${T_STATUS}</text>
+    <text x="${cx3}" y="${TITLE_Y}" text-anchor="middle" font-size="84" font-weight="bold" fill="white" font-family="${F}">${T_CONTACT}</text>
 
     <!-- ── Subtitles ── -->
-    <text x="${cx1}" y="${SUB_Y}" text-anchor="middle" font-size="32" fill="white" opacity="0.88" font-family="${F}">${S_TRANSFER}</text>
-    <text x="${cx2}" y="${SUB_Y}" text-anchor="middle" font-size="32" fill="white" opacity="0.88" font-family="${F}">${S_STATUS}</text>
-    <text x="${cx3}" y="${SUB_Y}" text-anchor="middle" font-size="32" fill="white" opacity="0.88" font-family="${F}">${S_CONTACT}</text>
+    <text x="${cx1}" y="${SUB_Y}" text-anchor="middle" font-size="58" fill="white" opacity="0.9" font-family="${F}">${S_TRANSFER}</text>
+    <text x="${cx2}" y="${SUB_Y}" text-anchor="middle" font-size="58" fill="white" opacity="0.9" font-family="${F}">${S_STATUS}</text>
+    <text x="${cx3}" y="${SUB_Y}" text-anchor="middle" font-size="58" fill="white" opacity="0.9" font-family="${F}">${S_CONTACT}</text>
 
   </g>
 </svg>`;
