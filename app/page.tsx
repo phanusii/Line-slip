@@ -19,6 +19,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { formatBytes, formatMoney } from "@/lib/format";
 import { statusLabels } from "@/lib/status";
+import { RichMenuBuilder } from "@/components/RichMenuBuilder";
 
 type Usage = {
   database: { used_bytes_estimate: number; limit_bytes: number };
@@ -382,6 +383,7 @@ export default function Home() {
             ["targets", "รายชื่อ"],
             ["slips", "ไฟล์สลิป"],
             ["storage", "พื้นที่/ล้างข้อมูล"],
+            ["richmenu", "Rich Menu"],
             ["line", "ตั้งค่า LINE"]
           ].map(([value, label]) => (
             <button
@@ -788,6 +790,16 @@ export default function Home() {
               </p>
             </div>
           </div>
+        </section>
+
+        <section hidden={activePage !== "richmenu"}>
+          <RichMenuBuilder
+            secret={secret}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            origin={origin || "https://line-google-line-line-line-line.vercel.app"}
+          />
         </section>
       </main>
 

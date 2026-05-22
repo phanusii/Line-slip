@@ -38,6 +38,34 @@ type SelectionResult = {
   qr: { data_url: string; payload: string };
 };
 
+type MyPayment = {
+  id: string;
+  display_name: string;
+  amount_due: number;
+  status: string;
+  paid_at: string | null;
+  event: { id: string; name: string; slug: string; is_open: boolean } | null;
+  slips: Array<{
+    id: string;
+    status: string;
+    amount_detected: number | null;
+    amount_expected: number | null;
+    created_at: string;
+    file_deleted_at: string | null;
+  }>;
+};
+
+const statusText: Record<string, string> = {
+  unpaid: "ยังไม่จ่าย",
+  pending_slip: "เลือกแล้ว รอส่งสลิป",
+  verified: "จ่ายแล้ว",
+  manual_review: "รอตรวจ",
+  amount_mismatch: "ยอดไม่ตรง",
+  duplicate_slip: "สลิปซ้ำ",
+  rejected: "ไม่ผ่าน",
+  deleted: "ลบแล้ว"
+};
+
 declare global {
   interface Window {
     liff?: LiffApi;
@@ -76,12 +104,14 @@ async function jsonFetch<T>(path: string, init?: RequestInit) {
 
 export default function LiffPaymentPage() {
   const liffId = process.env.NEXT_PUBLIC_LIFF_ID ?? "";
+  const [mode, setMode] = useState<"pay" | "me">("pay");
   const [events, setEvents] = useState<EventRow[]>([]);
   const [selectedEventId, setSelectedEventId] = useState("");
   const [selectedTargetId, setSelectedTargetId] = useState("");
   const [profile, setProfile] = useState<LiffProfile | null>(null);
   const [accessToken, setAccessToken] = useState("");
   const [result, setResult] = useState<SelectionResult | null>(null);
+  const [myPayments, setMyPayments] = useState<MyPayment[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,6 +121,9 @@ export default function LiffPaymentPage() {
       setBusy(true);
       setError(null);
       try {
+        const params = new URLSearchParams(window.location.search);
+        const activeMode = params.get("page") === "me" ? "me" : "pay";
+        setMode(activeMode);
         await loadLiffSdk();
         if (!window.liff) throw new Error("ไม่พบ LIFF SDK");
         await window.liff.init({ liffId });
@@ -101,14 +134,20 @@ export default function LiffPaymentPage() {
 
         const token = window.liff.getAccessToken();
         if (!token) throw new Error("ไม่พบ LINE access token กรุณาเปิดผ่าน LINE อีกครั้ง");
-        const [profileData, eventsData] = await Promise.all([
-          window.liff.getProfile(),
-          jsonFetch<{ events: EventRow[] }>("/api/liff/events")
-        ]);
+        const profileData = await window.liff.getProfile();
         setProfile(profileData);
         setAccessToken(token);
-        setEvents(eventsData.events);
-        setSelectedEventId(eventsData.events[0]?.id ?? "");
+        if (activeMode === "me") {
+          const meData = await jsonFetch<{ payments: MyPayment[] }>("/api/liff/me", {
+            method: "POST",
+            body: JSON.stringify({ accessToken: token })
+          });
+          setMyPayments(meData.payments);
+        } else {
+          const eventsData = await jsonFetch<{ events: EventRow[] }>("/api/liff/events");
+          setEvents(eventsData.events);
+          setSelectedEventId(eventsData.events[0]?.id ?? "");
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -158,6 +197,68 @@ export default function LiffPaymentPage() {
             ชื่อ NEXT_PUBLIC_LIFF_ID บน Vercel จากนั้น redeploy อีกครั้ง
           </p>
           <code className="codeBox">{typeof window !== "undefined" ? `${window.location.origin}/liff` : "/liff"}</code>
+        </section>
+      </main>
+    );
+  }
+
+  if (mode === "me") {
+    return (
+      <main className="liffShell">
+        <section className="liffHero">
+          <span className="brandKicker">ข้อมูลของฉัน</span>
+          <h1>สถานะการชำระเงิน</h1>
+          <p>ดูงานที่คุณเลือกไว้ ยอดที่ต้องจ่าย และสถานะสลิปล่าสุด</p>
+          {profile ? <span className="badge ok">เข้าสู่ระบบแล้ว: {profile.displayName}</span> : null}
+        </section>
+
+        {error ? (
+          <section className="alertPanel">
+            <span className="badge danger">ข้อผิดพลาด</span>
+            <p>{error}</p>
+          </section>
+        ) : null}
+
+        <section className="liffCard">
+          {myPayments.length ? (
+            <div className="paymentStatusList">
+              {myPayments.map((payment) => (
+                <article className="paymentStatusCard" key={payment.id}>
+                  <span className={payment.status === "verified" ? "badge ok" : "badge warn"}>
+                    {statusText[payment.status] ?? payment.status}
+                  </span>
+                  <h2>{payment.event?.name ?? "ไม่พบชื่องาน"}</h2>
+                  <p className="muted">{payment.display_name}</p>
+                  <strong>{formatMoney(payment.amount_due)} บาท</strong>
+                  {payment.slips[0] ? (
+                    <p className="muted">
+                      สลิปล่าสุด: {statusText[payment.slips[0].status] ?? payment.slips[0].status} ·{" "}
+                      {new Date(payment.slips[0].created_at).toLocaleString("th-TH")}
+                    </p>
+                  ) : (
+                    <p className="muted">ยังไม่มีสลิปในระบบ</p>
+                  )}
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="emptyState">ยังไม่มีข้อมูลการเลือกงาน กรุณากลับไปเลือกงานก่อน</div>
+          )}
+          <button
+            className="btn primary liffPrimary"
+            onClick={() => {
+              window.history.replaceState(null, "", "/liff");
+              setMode("pay");
+              setResult(null);
+              setError(null);
+              void jsonFetch<{ events: EventRow[] }>("/api/liff/events").then((data) => {
+                setEvents(data.events);
+                setSelectedEventId(data.events[0]?.id ?? "");
+              });
+            }}
+          >
+            เลือกงาน/รับ QR Code
+          </button>
         </section>
       </main>
     );

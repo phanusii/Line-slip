@@ -1,6 +1,7 @@
 .next
 node_modules
 .npm-cache
+.npm-cache*
 .env
 .env.local
 npm-debug.log*
