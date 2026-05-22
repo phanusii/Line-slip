@@ -3,6 +3,7 @@
 import {
   AlertTriangle,
   Archive,
+  Bell,
   CheckCircle2,
   Clock3,
   Download,
@@ -16,7 +17,8 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
-  Users
+  Users,
+  Volume2
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { formatBytes, formatMoney } from "@/lib/format";
@@ -45,8 +47,25 @@ type EventSummary = {
   target_count: number;
   paid_count: number;
   unpaid_count: number;
+  review_count: number;
   slip_count: number;
   storage_bytes: number;
+};
+
+type PendingCount = {
+  count: number;
+  latestSlipId: string | null;
+  latestCreatedAt: string | null;
+};
+
+type LineQuota = {
+  type: string;
+  limit: number | null;
+  used: number | null;
+  remaining: number | null;
+  canPush: boolean;
+  checkedAt: string;
+  error?: string;
 };
 
 type EventDetail = {
@@ -158,13 +177,35 @@ export default function Home() {
   const [newDefaultAmount, setNewDefaultAmount] = useState("");
   const [newTargetsText, setNewTargetsText] = useState(exampleTargetsText);
   const [contactUrl, setContactUrl] = useState("");
+  const [linePushPolicy, setLinePushPolicy] = useState("quota_aware");
+  const [adminReviewChannel, setAdminReviewChannel] = useState("dashboard_only");
+  const [telegramBotToken, setTelegramBotToken] = useState("");
+  const [telegramChatId, setTelegramChatId] = useState("");
+  const [discordWebhookUrl, setDiscordWebhookUrl] = useState("");
+  const [adminReviewTokenSecret, setAdminReviewTokenSecret] = useState("");
+  const [adminReviewTokenTtlHours, setAdminReviewTokenTtlHours] = useState("24");
+  const [lineQuota, setLineQuota] = useState<LineQuota | null>(null);
+  const [pendingCount, setPendingCount] = useState<PendingCount | null>(null);
+  const [lastPendingCount, setLastPendingCount] = useState<number | null>(null);
+  const [notifyEnabled, setNotifyEnabled] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const [contactUrlSaved, setContactUrlSaved] = useState(false);
   const [compactMenuPublished, setCompactMenuPublished] = useState(false);
 
   useEffect(() => {
     setOrigin(window.location.origin);
+    setNotifyEnabled(localStorage.getItem("admin_notifications_enabled") === "1");
     void checkSession();
   }, []);
+
+  useEffect(() => {
+    if (!adminUser) return;
+    void refreshPendingCount(false);
+    const timer = window.setInterval(() => {
+      void refreshPendingCount(true);
+    }, 20000);
+    return () => window.clearInterval(timer);
+  }, [adminUser, notifyEnabled, lastPendingCount]);
 
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === selectedEventId) ?? events[0],
@@ -222,18 +263,35 @@ export default function Home() {
     try {
       const { settings } = await api<{ settings: Record<string, string> }>("/api/admin/settings");
       setContactUrl(settings.contact_url ?? "");
+      setLinePushPolicy(settings.line_push_policy ?? "quota_aware");
+      setAdminReviewChannel(settings.admin_review_channel ?? "dashboard_only");
+      setTelegramBotToken(settings.telegram_bot_token ?? "");
+      setTelegramChatId(settings.telegram_chat_id ?? "");
+      setDiscordWebhookUrl(settings.discord_webhook_url ?? "");
+      setAdminReviewTokenSecret(settings.admin_review_token_secret ?? "");
+      setAdminReviewTokenTtlHours(settings.admin_review_token_ttl_hours ?? "24");
+      void loadLineQuota();
     } catch {
       // non-critical
     }
   }
 
-  async function saveContactUrl() {
+  async function saveSettings() {
     setBusy(true);
     setError(null);
     try {
       await api("/api/admin/settings", {
         method: "POST",
-        body: JSON.stringify({ contact_url: contactUrl })
+        body: JSON.stringify({
+          contact_url: contactUrl,
+          line_push_policy: linePushPolicy,
+          admin_review_channel: adminReviewChannel,
+          telegram_bot_token: telegramBotToken,
+          telegram_chat_id: telegramChatId,
+          discord_webhook_url: discordWebhookUrl,
+          admin_review_token_secret: adminReviewTokenSecret,
+          admin_review_token_ttl_hours: adminReviewTokenTtlHours
+        })
       });
       setContactUrlSaved(true);
       setTimeout(() => setContactUrlSaved(false), 3000);
@@ -241,6 +299,71 @@ export default function Home() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function loadLineQuota() {
+    try {
+      setLineQuota(await api<LineQuota>("/api/admin/line/quota"));
+    } catch {
+      // non-critical
+    }
+  }
+
+  async function enableBrowserNotifications() {
+    if (!("Notification" in window)) {
+      setToast("Browser นี้ไม่รองรับ Notification");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      localStorage.setItem("admin_notifications_enabled", "1");
+      setNotifyEnabled(true);
+      setToast("เปิดแจ้งเตือนบนเครื่องนี้แล้ว");
+    } else {
+      setToast("ยังไม่ได้อนุญาตแจ้งเตือนจาก browser");
+    }
+  }
+
+  async function refreshPendingCount(shouldNotify: boolean) {
+    try {
+      const data = await api<PendingCount>("/api/admin/slips/pending-count");
+      setPendingCount(data);
+      if (lastPendingCount === null) {
+        setLastPendingCount(data.count);
+        return;
+      }
+      if (shouldNotify && data.count > lastPendingCount) {
+        const message = `มีสลิปใหม่รอตรวจ ${data.count} รายการ`;
+        setToast(message);
+        document.title = `(${data.count}) สลิปรอตรวจ`;
+        playNotifySound();
+        if (notifyEnabled && "Notification" in window && Notification.permission === "granted") {
+          new Notification("สลิปใหม่รอตรวจ", { body: message });
+        }
+        await loadAll(true);
+      }
+      setLastPendingCount(data.count);
+    } catch {
+      // non-critical polling
+    }
+  }
+
+  function playNotifySound() {
+    try {
+      const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) return;
+      const ctx = new AudioContextCtor();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 880;
+      gain.gain.value = 0.03;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.18);
+    } catch {
+      // sound is optional
     }
   }
 
@@ -396,6 +519,7 @@ export default function Home() {
   const dbPct = usage ? percent(usage.database.used_bytes, usage.database.limit_bytes) : 0;
   const paidCount = events.reduce((sum, event) => sum + event.paid_count, 0);
   const unpaidCount = events.reduce((sum, event) => sum + event.unpaid_count, 0);
+  const pendingReviewTotal = pendingCount?.count ?? events.reduce((sum, event) => sum + (event.review_count ?? 0), 0);
   const totalDue = events.reduce((sum, event) => sum + Number(event.expected_total ?? 0), 0);
   const webhookUrl = `${origin || "https://your-domain.vercel.app"}/api/line/webhook`;
   const liffUrl = `${origin || "https://your-domain.vercel.app"}/liff`;
@@ -507,12 +631,24 @@ export default function Home() {
           </section>
         ) : null}
 
+        {toast ? (
+          <section className="toastPanel">
+            <Bell size={16} />
+            <span>{toast}</span>
+            <button className="iconButton" onClick={() => setToast(null)} aria-label="ปิดแจ้งเตือน">
+              ปิด
+            </button>
+          </section>
+        ) : null}
+
+        {adminUser ? (
+          <>
         <nav className="pageTabs" aria-label="เมนูหลังบ้าน">
           {[
             ["overview", "ภาพรวม"],
             ["events", "งานเรียกเก็บเงิน"],
             ["targets", "รายชื่อ"],
-            ["slips", "ไฟล์สลิป"],
+            ["slips", `สลิปรอตรวจ${pendingReviewTotal ? ` (${pendingReviewTotal})` : ""}`],
             ["storage", "พื้นที่/ล้างข้อมูล"],
             ["richmenu", "Rich Menu"],
             ["line", "ตั้งค่า LINE"]
@@ -544,9 +680,35 @@ export default function Home() {
             <span>ยังไม่จ่าย</span>
             <strong>{unpaidCount}</strong>
           </div>
+          <div>
+            <span>สลิปรอตรวจ</span>
+            <strong>{pendingReviewTotal}</strong>
+          </div>
         </section>
 
         <section className="grid" hidden={activePage !== "overview" && activePage !== "storage"}>
+          <div className="panel stat accentReview">
+            <div className="panelHeader">
+              <h2>คิวสลิปรอตรวจ</h2>
+              <Bell size={20} />
+            </div>
+            <strong>{pendingReviewTotal}</strong>
+            <p className="muted">
+              {pendingCount?.latestCreatedAt
+                ? `ล่าสุด ${new Date(pendingCount.latestCreatedAt).toLocaleString("th-TH")}`
+                : "ยังไม่มีสลิปรอตรวจ"}
+            </p>
+            <div className="actions">
+              <button className="btn primary" onClick={() => setActivePage("slips")}>
+                เปิดคิวตรวจ
+              </button>
+              <button className="btn subtle" onClick={enableBrowserNotifications}>
+                <Volume2 size={15} />
+                {notifyEnabled ? "เปิดแจ้งเตือนแล้ว" : "เปิดแจ้งเตือน"}
+              </button>
+            </div>
+          </div>
+
           <div className="panel stat accentMint">
             <div className="panelHeader">
               <h2>พื้นที่เก็บไฟล์</h2>
@@ -882,10 +1044,9 @@ export default function Home() {
           </div>
 
           <div className="setupCard" style={{ marginBottom: "1.5rem" }}>
-            <span className="setupLabel">Rich Menu Compact 3 ปุ่ม (โอนเงิน · สถานะ · ติดต่อ)</span>
+            <span className="setupLabel">Rich Menu 4 ปุ่ม (สร้าง QR · ส่งสลิป · สถานะ · ติดต่อ)</span>
             <p className="muted" style={{ marginBottom: "0.75rem" }}>
-              สร้างและเผยแพร่เมนูแถบบาง 3 ปุ่มโดยอัตโนมัติ ไม่ต้องอัปโหลดรูป
-              ปุ่มติดต่อจะใช้ URL ที่ตั้งด้านล่าง
+              สร้างและเผยแพร่เมนู 2x2 โดยอัตโนมัติ ปุ่มติดต่อจะใช้ URL ที่ตั้งด้านล่าง
             </p>
             <div className="actions">
               <button
@@ -893,32 +1054,102 @@ export default function Home() {
                 disabled={!adminUser || adminUser.role !== "admin" || busy}
                 onClick={publishCompactMenu}
               >
-                {busy ? "กำลังสร้าง…" : "🚀 สร้าง Rich Menu Compact"}
+                {busy ? "กำลังสร้าง…" : "สร้าง Rich Menu 4 ปุ่ม"}
               </button>
               {compactMenuPublished ? <span className="badge ok">เผยแพร่แล้ว ✓</span> : null}
             </div>
           </div>
 
           <div className="setupCard" style={{ marginBottom: "1.5rem" }}>
-            <span className="setupLabel">ลิงก์ปุ่มติดต่อ</span>
-            <p className="muted" style={{ marginBottom: "0.5rem" }}>
-              URL ที่เปิดเมื่อ user กดปุ่ม &quot;ติดต่อ&quot; เช่น LINE OA, Facebook, Google Form
-            </p>
+            <span className="setupLabel">ตั้งค่าการแจ้งเตือนและช่องทางแอดมิน</span>
+            <div className="formGrid">
+              <label className="field">
+                <span>ลิงก์ปุ่มติดต่อ</span>
+                <input
+                  type="url"
+                  value={contactUrl}
+                  onChange={(e) => setContactUrl(e.target.value)}
+                  placeholder="https://line.me/ti/p/~your_oa_id"
+                />
+              </label>
+              <label className="field">
+                <span>LINE push policy</span>
+                <select value={linePushPolicy} onChange={(e) => setLinePushPolicy(e.target.value)}>
+                  <option value="quota_aware">เช็กโควตาก่อน push</option>
+                  <option value="disabled">ไม่ใช้ push</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>ช่องทางตรวจสลิปแอดมิน</span>
+                <select value={adminReviewChannel} onChange={(e) => setAdminReviewChannel(e.target.value)}>
+                  <option value="dashboard_only">Dashboard เท่านั้น</option>
+                  <option value="telegram">Telegram</option>
+                  <option value="discord">Discord</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Token หมดอายุ (ชั่วโมง)</span>
+                <input
+                  inputMode="numeric"
+                  value={adminReviewTokenTtlHours}
+                  onChange={(e) => setAdminReviewTokenTtlHours(e.target.value)}
+                  placeholder="24"
+                />
+              </label>
+              <label className="field">
+                <span>Telegram Bot Token</span>
+                <input
+                  value={telegramBotToken}
+                  onChange={(e) => setTelegramBotToken(e.target.value)}
+                  placeholder="เว้นว่างถ้าไม่เปลี่ยน"
+                />
+              </label>
+              <label className="field">
+                <span>Telegram Chat ID</span>
+                <input
+                  value={telegramChatId}
+                  onChange={(e) => setTelegramChatId(e.target.value)}
+                  placeholder="-100xxxxxxxxxx"
+                />
+              </label>
+              <label className="field">
+                <span>Discord Webhook URL</span>
+                <input
+                  type="url"
+                  value={discordWebhookUrl}
+                  onChange={(e) => setDiscordWebhookUrl(e.target.value)}
+                  placeholder="https://discord.com/api/webhooks/..."
+                />
+              </label>
+              <label className="field">
+                <span>External review secret</span>
+                <input
+                  value={adminReviewTokenSecret}
+                  onChange={(e) => setAdminReviewTokenSecret(e.target.value)}
+                  placeholder="เว้นว่างเพื่อใช้ ADMIN_SESSION_SECRET"
+                />
+              </label>
+            </div>
             <div className="actions">
-              <input
-                type="url"
-                value={contactUrl}
-                onChange={(e) => setContactUrl(e.target.value)}
-                placeholder="https://line.me/ti/p/~your_oa_id"
-                style={{ flex: 1, minWidth: 0 }}
-              />
               <button
-                className="btn subtle"
+                className="btn primary"
                 disabled={!adminUser || adminUser.role !== "admin" || busy}
-                onClick={saveContactUrl}
+                onClick={saveSettings}
               >
-                {contactUrlSaved ? "บันทึกแล้ว ✓" : "บันทึก"}
+                {contactUrlSaved ? "บันทึกแล้ว ✓" : "บันทึกตั้งค่า"}
               </button>
+              <button className="btn subtle" onClick={loadLineQuota}>
+                เช็กโควตา LINE
+              </button>
+              {lineQuota ? (
+                <span className={lineQuota.canPush ? "badge ok" : "badge warn"}>
+                  {lineQuota.error
+                    ? "เช็กโควตาไม่ได้"
+                    : lineQuota.limit === null
+                      ? `ใช้แล้ว ${lineQuota.used ?? "-"}`
+                      : `เหลือ ${lineQuota.remaining} / ${lineQuota.limit}`}
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -978,6 +1209,20 @@ export default function Home() {
             origin={origin || "https://line-google-line-line-line-line.vercel.app"}
           />
         </section>
+          </>
+        ) : (
+          <section className="panel">
+            <div className="panelHeader">
+              <div>
+                <h2>{authChecking ? "กำลังตรวจสอบเซสชัน" : "กรุณาเข้าสู่ระบบ"}</h2>
+                <p className="muted">
+                  ข้อมูลหลังบ้าน รายชื่อ ยอดเงิน สลิป และการตั้งค่า LINE จะแสดงหลังยืนยันตัวตนผู้ดูแลเท่านั้น
+                </p>
+              </div>
+              <span className="badge">Protected</span>
+            </div>
+          </section>
+        )}
       </main>
 
       {cleanup ? (

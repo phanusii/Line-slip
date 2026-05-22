@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
+import jsQR from "jsqr";
 import sharp from "sharp";
+import { notifyAdminSlipReview } from "@/lib/admin-review";
 import { STORAGE_BUCKET } from "@/lib/env";
 import { createServiceClient } from "@/lib/supabase/server";
-import { verifySlip, type SlipVerifyResult } from "@/lib/slip-verify";
 
 type UploadSlipInput = {
   eventId: string;
@@ -13,6 +14,13 @@ type UploadSlipInput = {
   sourceBuffer: Buffer;
   mimeType?: string | null;
   lineMessageId?: string | null;
+  lineUserDbId?: string | null;
+};
+
+export type UploadSlipResult = {
+  id: string;
+  status: "manual_review" | "duplicate_slip";
+  duplicateOfId?: string;
 };
 
 export async function normalizeSlipImage(source: Buffer) {
@@ -27,14 +35,102 @@ export function hashImage(buffer: Buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
 
+export async function readSlipQrRef(buffer: Buffer) {
+  const image = await sharp(buffer, { failOn: "none" })
+    .rotate()
+    .resize({ width: 1400, withoutEnlargement: true })
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const decoded = jsQR(
+    new Uint8ClampedArray(image.data),
+    image.info.width,
+    image.info.height,
+    { inversionAttempts: "attemptBoth" }
+  );
+
+  if (!decoded?.data) return null;
+  return `qr:${crypto.createHash("sha256").update(decoded.data).digest("hex")}`;
+}
+
 export async function uploadSlipImage(input: UploadSlipInput) {
   const supabase = createServiceClient();
   const normalized = await normalizeSlipImage(input.sourceBuffer);
   const imageHash = hashImage(normalized);
+  const slipRef = await readSlipQrRef(input.sourceBuffer).catch(() => null);
   const now = new Date();
   const datePart = now.toISOString().replace(/[:.]/g, "-");
   const targetSegment = input.paymentTargetId ?? "no-target";
   const amount = Number(input.amountExpected ?? 0).toFixed(2);
+
+  const imageDuplicate = await supabase
+    .from("slip_submissions")
+    .select("id,event_id,payment_target_id")
+    .eq("image_hash", imageHash)
+    .is("metadata_deleted_at", null)
+    .limit(1)
+    .maybeSingle();
+
+  if (imageDuplicate.error) {
+    throw imageDuplicate.error;
+  }
+
+  const qrDuplicate = slipRef
+    ? await supabase
+        .from("slip_submissions")
+        .select("id,event_id,payment_target_id")
+        .eq("slip_ref", slipRef)
+        .is("metadata_deleted_at", null)
+        .limit(1)
+        .maybeSingle()
+    : { data: null, error: null };
+
+  if (qrDuplicate.error) {
+    throw qrDuplicate.error;
+  }
+
+  const duplicate = qrDuplicate.data ?? imageDuplicate.data;
+  if (duplicate) {
+    const duplicateInsert = await supabase
+      .from("slip_submissions")
+      .insert({
+        event_id: input.eventId,
+        payment_target_id: input.paymentTargetId ?? null,
+        line_user_id: input.lineUserDbId ?? null,
+        line_message_id: input.lineMessageId ?? null,
+        storage_bucket: STORAGE_BUCKET,
+        storage_path: null,
+        original_filename: `${input.personName ?? "unknown"}_${amount}_duplicate.jpg`,
+        file_size: 0,
+        mime_type: "image/jpeg",
+        image_hash: imageHash,
+        slip_ref: null,
+        amount_expected: input.amountExpected ?? null,
+        status: "duplicate_slip",
+        rejection_reason: `duplicate ${qrDuplicate.data ? "slip_ref" : "image_hash"} of slip ${duplicate.id}`
+      })
+      .select("id,status")
+      .single();
+
+    if (duplicateInsert.error) {
+      throw duplicateInsert.error;
+    }
+
+    if (input.paymentTargetId) {
+      await supabase
+        .from("payment_targets")
+        .update({ status: "duplicate_slip" })
+        .eq("id", input.paymentTargetId)
+        .neq("status", "verified");
+    }
+
+    return {
+      id: duplicateInsert.data.id,
+      status: "duplicate_slip",
+      duplicateOfId: duplicate.id
+    } satisfies UploadSlipResult;
+  }
+
   // Use payment_target_id (UUID) instead of person name — avoids Thai-character URL encoding issues
   const path = `events/${input.eventId}/manual_review/${targetSegment}_${amount}_${datePart}_${imageHash.slice(0, 12)}.jpg`;
   // Human-readable name kept only for download Content-Disposition
@@ -56,6 +152,7 @@ export async function uploadSlipImage(input: UploadSlipInput) {
     .insert({
       event_id: input.eventId,
       payment_target_id: input.paymentTargetId ?? null,
+      line_user_id: input.lineUserDbId ?? null,
       line_message_id: input.lineMessageId ?? null,
       storage_bucket: STORAGE_BUCKET,
       storage_path: path,
@@ -63,6 +160,7 @@ export async function uploadSlipImage(input: UploadSlipInput) {
       file_size: normalized.byteLength,
       mime_type: "image/jpeg",
       image_hash: imageHash,
+      slip_ref: slipRef,
       amount_expected: input.amountExpected ?? null,
       status: "manual_review"
     })
@@ -74,62 +172,24 @@ export async function uploadSlipImage(input: UploadSlipInput) {
     throw inserted.error;
   }
 
-  // ── Auto-verify with EasySlip ────────────────────────────────────────────
-  // Use original (pre-compression) buffer for better QR readability.
-  const verifyResult: SlipVerifyResult = await verifySlip(input.sourceBuffer);
-
-  let finalStatus: "verified" | "amount_mismatch" | "duplicate_slip" | "manual_review" =
-    "manual_review";
-  let finalPath = path;
-
-  if (verifyResult.ok) {
-    const expected = Number(input.amountExpected ?? 0);
-    const TOLERANCE = 1; // ±1 บาท
-
-    if (Math.abs(verifyResult.amount - expected) <= TOLERANCE) {
-      finalStatus = "verified";
-      // Move file to verified/ folder
-      const verifiedPath = path.replace("/manual_review/", "/verified/");
-      const moved = await supabase.storage
-        .from(STORAGE_BUCKET)
-        .move(path, verifiedPath);
-      if (!moved.error) finalPath = verifiedPath;
-    } else {
-      finalStatus = "amount_mismatch";
-    }
-  } else if (verifyResult.reason === "duplicate") {
-    finalStatus = "duplicate_slip";
-  }
-  // "not_configured" | "invalid_slip" | "api_error" → stays "manual_review"
-
-  // Update slip record with verification results
-  await supabase
-    .from("slip_submissions")
-    .update({
-      status: finalStatus,
-      storage_path: finalPath,
-      ...(verifyResult.ok && {
-        amount_detected: verifyResult.amount,
-        slip_ref: verifyResult.slipRef,
-        transfer_datetime: verifyResult.transferDatetime ?? undefined
-      })
-    })
-    .eq("id", inserted.data.id);
-
-  // If auto-verified → mark payment_target as paid
-  if (finalStatus === "verified" && input.paymentTargetId) {
+  if (input.paymentTargetId) {
     await supabase
       .from("payment_targets")
       .update({
-        status: "verified",
-        paid_at: new Date().toISOString(),
-        paid_slip_submission_id: inserted.data.id
+        status: "manual_review",
+        paid_at: null,
+        paid_slip_submission_id: null
       })
       .eq("id", input.paymentTargetId)
-      .neq("status", "verified"); // idempotent
+      .neq("status", "verified");
   }
 
-  return { ...inserted.data, status: finalStatus, verifyResult };
+  await notifyAdminSlipReview(inserted.data.id);
+
+  return {
+    id: inserted.data.id,
+    status: "manual_review"
+  } satisfies UploadSlipResult;
 }
 
 export async function downloadLineContent(messageId: string) {

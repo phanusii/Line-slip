@@ -211,3 +211,107 @@ export async function generateCompactMenuImage(): Promise<Buffer> {
 
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
+
+export async function generateFourButtonMenuImage(): Promise<Buffer> {
+  const sharp = (await import("sharp")).default;
+  const W = 2500;
+  const H = 1686;
+  const COL = Math.floor(W / 2);
+  const ROW = Math.floor(H / 2);
+  const F = "Arial,Helvetica,sans-serif";
+
+  const items = [
+    {
+      x: 76,
+      y: 74,
+      title: "สร้าง QR Code",
+      sub: "เลือกงานและชื่อเพื่อจ่ายเงิน",
+      badge: "QR",
+      accent: "#7dd3fc",
+      text: "#1f3b63"
+    },
+    {
+      x: COL + 48,
+      y: 74,
+      title: "ส่งสลิป",
+      sub: "อัปโหลดหลักฐานการโอน",
+      badge: "UP",
+      accent: "#86efac",
+      text: "#14532d"
+    },
+    {
+      x: 76,
+      y: ROW + 48,
+      title: "สถานะ",
+      sub: "ดูผลชำระเงินล่าสุด",
+      badge: "OK",
+      accent: "#c4b5fd",
+      text: "#3b2779"
+    },
+    {
+      x: COL + 48,
+      y: ROW + 48,
+      title: "ติดต่อ",
+      sub: "สอบถามผู้ดูแลระบบ",
+      badge: "Hi",
+      accent: "#f9a8d4",
+      text: "#831843"
+    }
+  ];
+
+  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="rainbow" x1="0" y1="0" x2="${W}" y2="${H}" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffe4e6"/>
+      <stop offset="18%" stop-color="#fed7aa"/>
+      <stop offset="36%" stop-color="#fef3c7"/>
+      <stop offset="54%" stop-color="#bbf7d0"/>
+      <stop offset="72%" stop-color="#bae6fd"/>
+      <stop offset="88%" stop-color="#ddd6fe"/>
+      <stop offset="100%" stop-color="#fbcfe8"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="18%" cy="18%" r="52%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity=".9"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="88%" cy="78%" r="58%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity=".65"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#64748b" flood-opacity=".20"/>
+    </filter>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#rainbow)"/>
+  <rect width="${W}" height="${H}" fill="url(#glowA)"/>
+  <rect width="${W}" height="${H}" fill="url(#glowB)"/>
+
+  <path d="M-120 500 C260 240 540 240 900 500 S1530 750 1980 440 S2500 190 2680 390"
+        fill="none" stroke="#ffffff" stroke-width="86" stroke-linecap="round" opacity=".34"/>
+  <path d="M-160 1120 C260 910 520 980 860 1180 S1510 1470 1940 1110 S2380 830 2680 1040"
+        fill="none" stroke="#ffffff" stroke-width="62" stroke-linecap="round" opacity=".26"/>
+
+  ${items.map((item) => `
+    <g filter="url(#softShadow)">
+      <rect x="${item.x}" y="${item.y}" width="${COL - 124}" height="${ROW - 122}" rx="64"
+            fill="#ffffff" fill-opacity=".76" stroke="#ffffff" stroke-width="5"/>
+    </g>
+    <rect x="${item.x + 34}" y="${item.y + 34}" width="${COL - 192}" height="14" rx="7" fill="${item.accent}"/>
+    <circle cx="${item.x + 174}" cy="${item.y + 252}" r="116" fill="${item.accent}" opacity=".86"/>
+    <circle cx="${item.x + 174}" cy="${item.y + 252}" r="82" fill="#ffffff" opacity=".42"/>
+    <text x="${item.x + 174}" y="${item.y + 278}" text-anchor="middle"
+          font-family="${F}" font-size="74" font-weight="900" fill="${item.text}">${item.badge}</text>
+    <text x="${item.x + 336}" y="${item.y + 244}" font-family="${F}" font-size="86"
+          font-weight="900" fill="${item.text}">${item.title}</text>
+    <text x="${item.x + 340}" y="${item.y + 338}" font-family="${F}" font-size="46"
+          font-weight="700" fill="#64748b">${item.sub}</text>
+    <path d="M${item.x + COL - 260} ${item.y + ROW - 238} h110 a44 44 0 0 1 0 88 h-110 a44 44 0 0 1 0-88"
+          fill="${item.accent}" opacity=".52"/>
+  `).join("")}
+
+  <rect x="${COL - 2}" y="72" width="4" height="${H - 144}" rx="2" fill="#ffffff" opacity=".55"/>
+  <rect x="72" y="${ROW - 2}" width="${W - 144}" height="4" rx="2" fill="#ffffff" opacity=".55"/>
+</svg>`;
+
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}

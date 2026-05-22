@@ -43,24 +43,6 @@ function sessionSecret() {
   return secret;
 }
 
-function adminEmail() {
-  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
-  if (!email) {
-    throw jsonResponse("กรุณาตั้งค่า ADMIN_EMAIL ก่อนใช้งานระบบผู้ดูแล", 500);
-  }
-
-  return email;
-}
-
-function adminPasswordHash() {
-  const hash = process.env.ADMIN_PASSWORD_HASH;
-  if (!hash || !hash.startsWith("scrypt$")) {
-    throw jsonResponse("กรุณาตั้งค่า ADMIN_PASSWORD_HASH ก่อนใช้งานระบบผู้ดูแล", 500);
-  }
-
-  return hash;
-}
-
 function sign(payload: string) {
   return createHmac("sha256", sessionSecret()).update(payload).digest("base64url");
 }
@@ -131,9 +113,13 @@ export function expiredSessionCookieOptions() {
 }
 
 export function verifyAdminCredentials(email: string, password: string) {
+  const configuredEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const configuredPasswordHash = process.env.ADMIN_PASSWORD_HASH;
+  if (!configuredEmail || !configuredPasswordHash?.startsWith("scrypt$")) return null;
+
   const normalizedEmail = email.trim().toLowerCase();
-  if (!safeEqual(normalizedEmail, adminEmail())) return null;
-  if (!verifyPassword(password, adminPasswordHash())) return null;
+  if (!safeEqual(normalizedEmail, configuredEmail)) return null;
+  if (!verifyPassword(password, configuredPasswordHash)) return null;
 
   return {
     email: normalizedEmail,

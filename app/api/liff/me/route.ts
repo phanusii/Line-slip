@@ -34,8 +34,9 @@ export async function POST(request: NextRequest) {
 
     const { data: targets, error: targetsError } = await supabase
       .from("payment_targets")
-      .select("id,display_name,amount_due,status,paid_at,events(id,name,slug,is_open)")
+      .select("id,display_name,amount_due,status,paid_at,events(id,name,slug,is_open,archived_at)")
       .eq("selected_line_user_id", lineUser.id)
+      .neq("status", "deleted")
       .order("updated_at", { ascending: false });
 
     if (targetsError) throw targetsError;
@@ -54,8 +55,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       profile,
-      payments: (targets ?? []).map((target) => {
+      payments: (targets ?? []).flatMap((target) => {
         const event = Array.isArray(target.events) ? target.events[0] : target.events;
+        if (!event || event.archived_at || !event.is_open) return [];
         return {
           id: target.id,
           display_name: target.display_name,

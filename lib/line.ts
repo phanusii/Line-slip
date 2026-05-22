@@ -1,12 +1,14 @@
 import crypto from "node:crypto";
 
-function appBaseUrl() {
+export type LiffPage = "pay" | "slip" | "me";
+
+export function appBaseUrl() {
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return "https://line-google-line-line-line-line.vercel.app";
 }
 
-export function liffUri(page?: "me") {
+export function liffUri(page?: LiffPage) {
   const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
   const suffix = page ? `?page=${page}` : "";
 
@@ -30,12 +32,17 @@ export function lineMenuMessages(text: string) {
         actions: [
           {
             type: "uri",
-            label: "เลือกงาน/รับ QR",
-            uri: liffUri()
+            label: "สร้าง QR",
+            uri: liffUri("pay")
           },
           {
             type: "uri",
-            label: "ข้อมูลของฉัน",
+            label: "ส่งสลิป",
+            uri: liffUri("slip")
+          },
+          {
+            type: "uri",
+            label: "สถานะ",
             uri: liffUri("me")
           }
         ]
@@ -53,7 +60,9 @@ export function verifyLineSignature(body: string, signature: string | null) {
     .update(body)
     .digest("base64");
 
-  return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
+  const expected = Buffer.from(digest);
+  const actual = Buffer.from(signature);
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }
 
 export async function replyLine(replyToken: string, messages: unknown[]) {
@@ -72,9 +81,9 @@ export async function replyLine(replyToken: string, messages: unknown[]) {
 
 export async function pushLine(lineUserId: string, messages: unknown[]) {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!token) return;
+  if (!token) return { ok: false, error: "LINE_CHANNEL_ACCESS_TOKEN is not configured" };
 
-  await fetch("https://api.line.me/v2/bot/message/push", {
+  const response = await fetch("https://api.line.me/v2/bot/message/push", {
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`,
@@ -82,6 +91,40 @@ export async function pushLine(lineUserId: string, messages: unknown[]) {
     },
     body: JSON.stringify({ to: lineUserId, messages })
   });
+
+  if (!response.ok) {
+    return { ok: false, error: await response.text() };
+  }
+
+  return { ok: true };
+}
+
+export async function getLineMessageQuota() {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) throw new Error("ยังไม่ได้ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN");
+
+  const headers = { authorization: `Bearer ${token}` };
+  const [quotaResponse, consumptionResponse] = await Promise.all([
+    fetch("https://api.line.me/v2/bot/message/quota", { headers }),
+    fetch("https://api.line.me/v2/bot/message/quota/consumption", { headers })
+  ]);
+
+  if (!quotaResponse.ok) throw new Error(await quotaResponse.text());
+  if (!consumptionResponse.ok) throw new Error(await consumptionResponse.text());
+
+  const quota = (await quotaResponse.json()) as { type: "none" | "limited"; value?: number };
+  const consumption = (await consumptionResponse.json()) as { totalUsage: number };
+  const limit = quota.type === "limited" ? Number(quota.value ?? 0) : null;
+  const used = Number(consumption.totalUsage ?? 0);
+  const remaining = limit === null ? null : Math.max(0, limit - used);
+
+  return {
+    type: quota.type,
+    limit,
+    used,
+    remaining,
+    canPush: typeof remaining === "number" && remaining > 0
+  };
 }
 
 export function buildVerifiedStatusFlex(opts: {
@@ -130,61 +173,6 @@ export function buildVerifiedStatusFlex(opts: {
               { type: "text", text: dateStr, flex: 1, align: "end", size: "sm" }
             ]
           }] : [])
-        ]
-      }
-    }
-  };
-}
-
-export function buildAutoVerifiedFlex(opts: {
-  displayName: string;
-  eventName: string;
-  amount: number;
-  senderName: string;
-}) {
-  return {
-    type: "flex",
-    altText: `✅ ยืนยันการชำระเงิน ${opts.amount.toLocaleString("th-TH")} บาท`,
-    contents: {
-      type: "bubble",
-      header: {
-        type: "box",
-        layout: "vertical",
-        backgroundColor: "#16a34a",
-        paddingAll: "20px",
-        contents: [
-          { type: "text", text: "✅ ยืนยันการชำระเงินสำเร็จ", color: "#ffffff", weight: "bold", size: "lg" }
-        ]
-      },
-      body: {
-        type: "box",
-        layout: "vertical",
-        spacing: "sm",
-        contents: [
-          { type: "text", text: opts.displayName, weight: "bold", size: "lg" },
-          { type: "text", text: opts.eventName, color: "#888888", size: "sm" },
-          { type: "separator", margin: "md" },
-          {
-            type: "box", layout: "horizontal", margin: "md",
-            contents: [
-              { type: "text", text: "ยอดที่ชำระ", flex: 1, color: "#555555", size: "sm" },
-              { type: "text", text: `${opts.amount.toLocaleString("th-TH")} บาท`, flex: 1, align: "end", weight: "bold", color: "#16a34a", size: "sm" }
-            ]
-          },
-          {
-            type: "box", layout: "horizontal",
-            contents: [
-              { type: "text", text: "ผู้โอน", flex: 1, color: "#555555", size: "sm" },
-              { type: "text", text: opts.senderName, flex: 2, align: "end", size: "sm", wrap: true }
-            ]
-          }
-        ]
-      },
-      footer: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          { type: "text", text: "ระบบตรวจสอบอัตโนมัติผ่าน EasySlip", size: "xs", color: "#aaaaaa", align: "center" }
         ]
       }
     }

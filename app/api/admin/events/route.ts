@@ -98,6 +98,7 @@ export async function GET(request: NextRequest) {
         const slips = (event.slip_submissions ?? []).filter((slip) => !slip.metadata_deleted_at);
         const paid = targets.filter((target) => target.status === "verified").length;
         const unpaid = targets.filter((target) => target.status !== "verified").length;
+        const review = slips.filter((slip) => slip.status === "manual_review").length;
         const storageBytes = slips
           .filter((slip) => slip.storage_path && !slip.file_deleted_at)
           .reduce((sum, slip) => sum + Number(slip.file_size ?? 0), 0);
@@ -111,6 +112,7 @@ export async function GET(request: NextRequest) {
           target_count: targets.length,
           paid_count: paid,
           unpaid_count: unpaid,
+          review_count: review,
           slip_count: slips.length,
           storage_bytes: storageBytes
         };

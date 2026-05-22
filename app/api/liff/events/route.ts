@@ -1,9 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { formatApiError } from "@/lib/api-error";
+import { requireLineAccessToken } from "@/lib/liff";
 import { createServiceClient } from "@/lib/supabase/server";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    await requireLineAccessToken(request);
     const supabase = createServiceClient();
     const { data, error } = await supabase
       .from("events")
@@ -35,6 +37,7 @@ export async function GET() {
       }))
     });
   } catch (error) {
+    if (error instanceof Response) return error;
     return NextResponse.json({ error: formatApiError(error) }, { status: 500 });
   }
 }

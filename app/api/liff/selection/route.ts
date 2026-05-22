@@ -65,14 +65,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "รายชื่อนี้ชำระเงินแล้วหรือไม่พร้อมใช้งาน" }, { status: 400 });
     }
 
-    if (target.selected_line_user_id && target.selected_line_user_id !== lineUser.id) {
+    const selectedAt = new Date().toISOString();
+    const updated = await supabase
+      .from("payment_targets")
+      .update({
+        selected_line_user_id: lineUser.id,
+        status: "pending_slip",
+        updated_at: selectedAt
+      })
+      .eq("id", target.id)
+      .eq("event_id", target.event_id)
+      .neq("status", "verified")
+      .neq("status", "deleted")
+      .or(`selected_line_user_id.is.null,selected_line_user_id.eq.${lineUser.id}`)
+      .select("id")
+      .maybeSingle();
+
+    if (updated.error) throw updated.error;
+
+    if (!updated.data) {
       return NextResponse.json(
         { error: "รายชื่อนี้ถูกเลือกไว้แล้ว หากเลือกผิดให้ติดต่อผู้ดูแล" },
         { status: 409 }
       );
     }
 
-    const selectedAt = new Date().toISOString();
     const cleared = await supabase
       .from("payment_targets")
       .update({ selected_line_user_id: null, status: "unpaid" })
@@ -82,17 +99,6 @@ export async function POST(request: NextRequest) {
       .neq("status", "verified");
 
     if (cleared.error) throw cleared.error;
-
-    const updated = await supabase
-      .from("payment_targets")
-      .update({
-        selected_line_user_id: lineUser.id,
-        status: "pending_slip",
-        updated_at: selectedAt
-      })
-      .eq("id", target.id);
-
-    if (updated.error) throw updated.error;
 
     const amount = Number(target.amount_due);
     const payload = buildPromptPayPayload(event.promptpay_id, amount);
