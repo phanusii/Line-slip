@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { downloadLineContent, uploadSlipImage } from "@/lib/slips";
 import {
+  buildAutoVerifiedFlex,
   buildCheckStatusFlex,
   buildVerifiedStatusFlex,
   lineMenuMessages,
@@ -173,9 +174,46 @@ export async function POST(request: NextRequest) {
       }
 
       if (event.replyToken) {
-        await replyLine(event.replyToken, [
-          { type: "text", text: "รับสลิปแล้ว ระบบบันทึกไฟล์ไว้เรียบร้อยและส่งให้แอดมินตรวจสอบ" }
-        ]);
+        const vr = slip.verifyResult;
+        const eventName =
+          Array.isArray(activeSelection.data.events)
+            ? (activeSelection.data.events[0] as { name?: string })?.name ?? ""
+            : (activeSelection.data.events as { name?: string } | null)?.name ?? "";
+
+        if (vr.ok && slip.status === "verified") {
+          // ✅ Auto-verified: ยอดตรง
+          await replyLine(event.replyToken, [
+            buildAutoVerifiedFlex({
+              displayName: activeSelection.data.display_name,
+              eventName,
+              amount: vr.amount,
+              senderName: vr.senderName
+            })
+          ]);
+        } else if (vr.ok && slip.status === "amount_mismatch") {
+          // ⚠️ ยอดไม่ตรง
+          await replyLine(event.replyToken, [
+            {
+              type: "text",
+              text: `⚠️ ยอดเงินไม่ตรงค่ะ\n\nสลิประบุ: ${vr.amount.toLocaleString("th-TH")} บาท\nยอดที่ต้องชำระ: ${Number(activeSelection.data.amount_due).toLocaleString("th-TH")} บาท\n\nได้ส่งให้แอดมินตรวจสอบแล้ว กรุณารอการยืนยัน`
+            }
+          ]);
+        } else if (!vr.ok && vr.reason === "duplicate") {
+          // ❌ สลิปซ้ำ
+          await replyLine(event.replyToken, [
+            { type: "text", text: "❌ สลิปนี้เคยถูกส่งแล้ว ไม่สามารถใช้สลิปซ้ำได้ค่ะ" }
+          ]);
+        } else if (!vr.ok && vr.reason === "invalid_slip") {
+          // 📷 อ่านสลิปไม่ได้ → manual_review
+          await replyLine(event.replyToken, [
+            { type: "text", text: "📷 อ่านข้อมูลจากสลิปไม่ได้ค่ะ กรุณาส่งรูปที่ชัดเจนกว่านี้ หรือรอแอดมินตรวจสอบ" }
+          ]);
+        } else {
+          // manual_review (API ไม่ได้ตั้งค่า / error) → แจ้งรอตรวจ
+          await replyLine(event.replyToken, [
+            { type: "text", text: "📋 รับสลิปแล้วค่ะ ระบบบันทึกไฟล์เรียบร้อยแล้ว จะแจ้งผลการตรวจสอบให้ทราบภายหลัง" }
+          ]);
+        }
       }
     } catch {
       if (event.replyToken) {

@@ -136,6 +136,61 @@ export function buildVerifiedStatusFlex(opts: {
   };
 }
 
+export function buildAutoVerifiedFlex(opts: {
+  displayName: string;
+  eventName: string;
+  amount: number;
+  senderName: string;
+}) {
+  return {
+    type: "flex",
+    altText: `✅ ยืนยันการชำระเงิน ${opts.amount.toLocaleString("th-TH")} บาท`,
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#16a34a",
+        paddingAll: "20px",
+        contents: [
+          { type: "text", text: "✅ ยืนยันการชำระเงินสำเร็จ", color: "#ffffff", weight: "bold", size: "lg" }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        contents: [
+          { type: "text", text: opts.displayName, weight: "bold", size: "lg" },
+          { type: "text", text: opts.eventName, color: "#888888", size: "sm" },
+          { type: "separator", margin: "md" },
+          {
+            type: "box", layout: "horizontal", margin: "md",
+            contents: [
+              { type: "text", text: "ยอดที่ชำระ", flex: 1, color: "#555555", size: "sm" },
+              { type: "text", text: `${opts.amount.toLocaleString("th-TH")} บาท`, flex: 1, align: "end", weight: "bold", color: "#16a34a", size: "sm" }
+            ]
+          },
+          {
+            type: "box", layout: "horizontal",
+            contents: [
+              { type: "text", text: "ผู้โอน", flex: 1, color: "#555555", size: "sm" },
+              { type: "text", text: opts.senderName, flex: 2, align: "end", size: "sm", wrap: true }
+            ]
+          }
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          { type: "text", text: "ระบบตรวจสอบอัตโนมัติผ่าน EasySlip", size: "xs", color: "#aaaaaa", align: "center" }
+        ]
+      }
+    }
+  };
+}
+
 export function buildCheckStatusFlex(liffMeUrl: string) {
   return {
     type: "flex",

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import sharp from "sharp";
 import { STORAGE_BUCKET } from "@/lib/env";
 import { createServiceClient } from "@/lib/supabase/server";
+import { verifySlip, type SlipVerifyResult } from "@/lib/slip-verify";
 
 type UploadSlipInput = {
   eventId: string;
@@ -73,7 +74,62 @@ export async function uploadSlipImage(input: UploadSlipInput) {
     throw inserted.error;
   }
 
-  return inserted.data;
+  // ── Auto-verify with EasySlip ────────────────────────────────────────────
+  // Use original (pre-compression) buffer for better QR readability.
+  const verifyResult: SlipVerifyResult = await verifySlip(input.sourceBuffer);
+
+  let finalStatus: "verified" | "amount_mismatch" | "duplicate_slip" | "manual_review" =
+    "manual_review";
+  let finalPath = path;
+
+  if (verifyResult.ok) {
+    const expected = Number(input.amountExpected ?? 0);
+    const TOLERANCE = 1; // ±1 บาท
+
+    if (Math.abs(verifyResult.amount - expected) <= TOLERANCE) {
+      finalStatus = "verified";
+      // Move file to verified/ folder
+      const verifiedPath = path.replace("/manual_review/", "/verified/");
+      const moved = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .move(path, verifiedPath);
+      if (!moved.error) finalPath = verifiedPath;
+    } else {
+      finalStatus = "amount_mismatch";
+    }
+  } else if (verifyResult.reason === "duplicate") {
+    finalStatus = "duplicate_slip";
+  }
+  // "not_configured" | "invalid_slip" | "api_error" → stays "manual_review"
+
+  // Update slip record with verification results
+  await supabase
+    .from("slip_submissions")
+    .update({
+      status: finalStatus,
+      storage_path: finalPath,
+      ...(verifyResult.ok && {
+        amount_detected: verifyResult.amount,
+        slip_ref: verifyResult.slipRef,
+        transfer_datetime: verifyResult.transferDatetime ?? undefined
+      })
+    })
+    .eq("id", inserted.data.id);
+
+  // If auto-verified → mark payment_target as paid
+  if (finalStatus === "verified" && input.paymentTargetId) {
+    await supabase
+      .from("payment_targets")
+      .update({
+        status: "verified",
+        paid_at: new Date().toISOString(),
+        paid_slip_submission_id: inserted.data.id
+      })
+      .eq("id", input.paymentTargetId)
+      .neq("status", "verified"); // idempotent
+  }
+
+  return { ...inserted.data, status: finalStatus, verifyResult };
 }
 
 export async function downloadLineContent(messageId: string) {
