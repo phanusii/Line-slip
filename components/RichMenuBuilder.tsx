@@ -88,7 +88,7 @@ function readFileAsDataUrl(file: File) {
 }
 
 type RichMenuBuilderProps = {
-  secret: string;
+  isAuthenticated: boolean;
   busy: boolean;
   setBusy: (busy: boolean) => void;
   setError: (error: string | null) => void;
@@ -96,7 +96,7 @@ type RichMenuBuilderProps = {
 };
 
 export function RichMenuBuilder({
-  secret,
+  isAuthenticated,
   busy,
   setBusy,
   setError,
@@ -185,9 +185,9 @@ export function RichMenuBuilder({
     try {
       const response = await fetch("/api/admin/rich-menu/publish", {
         method: "POST",
+        credentials: "include",
         headers: {
-          "content-type": "application/json",
-          "x-admin-secret": secret
+          "content-type": "application/json"
         },
         body: JSON.stringify({
           name,
@@ -339,7 +339,7 @@ export function RichMenuBuilder({
             </div>
           </div>
 
-          <button className="btn primary" disabled={!secret || busy} onClick={publishRichMenu}>
+          <button className="btn primary" disabled={!isAuthenticated || busy} onClick={publishRichMenu}>
             <Send size={16} />
             {busy ? "กำลังเผยแพร่" : "เผยแพร่ Rich Menu"}
           </button>

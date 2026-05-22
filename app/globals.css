@@ -174,13 +174,32 @@ a {
   font-weight: 800;
 }
 
-.secret {
+.loginForm,
+.adminSession {
   display: grid;
   gap: 10px;
+}
+
+.loginForm {
+  grid-template-columns: minmax(180px, 1fr) minmax(150px, 0.8fr) auto;
+}
+
+.adminSession {
+  align-items: center;
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.secret input,
+.sessionEmail {
+  align-items: center;
+  color: var(--text);
+  display: inline-flex;
+  font-weight: 850;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.loginForm input,
 .field input,
 .field select,
 .field textarea,
@@ -196,7 +215,7 @@ a {
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
-.secret input:focus,
+.loginForm input:focus,
 .field input:focus,
 .field select:focus,
 .field textarea:focus,
@@ -933,7 +952,8 @@ tbody tr:hover {
     padding: 14px;
   }
 
-  .secret {
+  .loginForm,
+  .adminSession {
     grid-template-columns: 1fr;
   }
 

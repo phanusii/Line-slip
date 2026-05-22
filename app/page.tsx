@@ -9,6 +9,8 @@ import {
   Eye,
   FileSpreadsheet,
   HardDrive,
+  LogOut,
+  Mail,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -91,12 +93,17 @@ function toneClass(value: number) {
   return "";
 }
 
-async function api<T>(path: string, secret: string, init?: RequestInit): Promise<T> {
+type AuthUser = {
+  email: string;
+  role: "admin" | "viewer";
+};
+
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
+    credentials: "include",
     headers: {
       "content-type": "application/json",
-      "x-admin-secret": secret,
       ...(init?.headers ?? {})
     }
   });
@@ -117,7 +124,10 @@ async function api<T>(path: string, secret: string, init?: RequestInit): Promise
 }
 
 export default function Home() {
-  const [secret, setSecret] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [adminUser, setAdminUser] = useState<AuthUser | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [events, setEvents] = useState<EventSummary[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -141,16 +151,8 @@ export default function Home() {
   const [newTargetsText, setNewTargetsText] = useState(exampleTargetsText);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("admin-secret");
-    if (saved) setSecret(saved);
-  }, []);
-
-  useEffect(() => {
-    if (secret) window.localStorage.setItem("admin-secret", secret);
-  }, [secret]);
-
-  useEffect(() => {
     setOrigin(window.location.origin);
+    void checkSession();
   }, []);
 
   const selectedEvent = useMemo(
@@ -158,21 +160,68 @@ export default function Home() {
     [events, selectedEventId]
   );
 
-  async function loadAll() {
-    if (!secret) return;
+  async function checkSession() {
+    setAuthChecking(true);
+    try {
+      const response = await fetch("/api/admin/session", { credentials: "include" });
+      if (!response.ok) return;
+      const data = (await response.json()) as { user: AuthUser };
+      setAdminUser(data.user);
+      await loadAll(true);
+    } catch {
+      setAdminUser(null);
+    } finally {
+      setAuthChecking(false);
+    }
+  }
+
+  async function loginAdmin() {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/admin/login", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password })
+      });
+      const data = (await response.json()) as { user?: AuthUser; error?: string };
+      if (!response.ok) throw new Error(data.error ?? "เข้าสู่ระบบไม่สำเร็จ");
+      setAdminUser(data.user ?? null);
+      setPassword("");
+      await loadAll(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logoutAdmin() {
+    await fetch("/api/admin/logout", { method: "POST", credentials: "include" });
+    setAdminUser(null);
+    setUsage(null);
+    setEvents([]);
+    setDetail(null);
+    setSelectedEventId(null);
+    setPassword("");
+  }
+
+  async function loadAll(force = false) {
+    if (!force && !adminUser) return;
     setBusy(true);
     setError(null);
     try {
       const [usageData, eventsData] = await Promise.all([
-        api<Usage>("/api/admin/usage", secret),
-        api<{ events: EventSummary[] }>("/api/admin/events", secret)
+        api<Usage>("/api/admin/usage"),
+        api<{ events: EventSummary[] }>("/api/admin/events")
       ]);
       setUsage(usageData);
       setEvents(eventsData.events);
       const activeId = selectedEventId ?? eventsData.events[0]?.id ?? null;
       setSelectedEventId(activeId);
       if (activeId) {
-        setDetail(await api<EventDetail>(`/api/admin/events/${activeId}`, secret));
+        setDetail(await api<EventDetail>(`/api/admin/events/${activeId}`));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -185,7 +234,7 @@ export default function Home() {
     setSelectedEventId(eventId);
     setError(null);
     try {
-      setDetail(await api<EventDetail>(`/api/admin/events/${eventId}`, secret));
+      setDetail(await api<EventDetail>(`/api/admin/events/${eventId}`));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -196,7 +245,7 @@ export default function Home() {
     setBusy(true);
     setError(null);
     try {
-      await api(`/api/admin/events/${cleanup.event.id}/cleanup`, secret, {
+      await api(`/api/admin/events/${cleanup.event.id}/cleanup`, {
         method: "POST",
         body: JSON.stringify({
           mode: cleanup.mode,
@@ -217,14 +266,13 @@ export default function Home() {
   async function openSlip(slipId: string) {
     const data = await api<{ signedUrl: string }>(
       `/api/admin/slips/${slipId}/signed-url`,
-      secret,
       { method: "POST", body: "{}" }
     );
     setPreviewUrl(data.signedUrl);
   }
 
   function authenticatedDownload(url: string) {
-    fetch(url, { headers: { "x-admin-secret": secret } })
+    fetch(url, { credentials: "include" })
       .then(async (response) => {
         if (!response.ok) throw new Error(await response.text());
         const blob = await response.blob();
@@ -243,7 +291,7 @@ export default function Home() {
     setBusy(true);
     setError(null);
     try {
-      await api(`/api/admin/slips/${slipId}/status`, secret, {
+      await api(`/api/admin/slips/${slipId}/status`, {
         method: "POST",
         body: JSON.stringify({
           status,
@@ -251,7 +299,7 @@ export default function Home() {
         })
       });
       if (selectedEventId) {
-        setDetail(await api<EventDetail>(`/api/admin/events/${selectedEventId}`, secret));
+        setDetail(await api<EventDetail>(`/api/admin/events/${selectedEventId}`));
       }
       await loadAll();
     } catch (err) {
@@ -267,7 +315,6 @@ export default function Home() {
     try {
       const data = await api<{ event: EventSummary }>(
         "/api/admin/events",
-        secret,
         {
           method: "POST",
           body: JSON.stringify({
@@ -285,7 +332,7 @@ export default function Home() {
       setNewTargetsText(exampleTargetsText);
       setSelectedEventId(data.event.id);
       setActivePage("events");
-      await loadAll();
+      await loadAll(true);
       await selectEvent(data.event.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -345,23 +392,56 @@ export default function Home() {
           </div>
         </div>
         <div className="loginCard">
-          <span className="loginLabel">เข้าสู่หลังบ้าน</span>
-          <div className="secret">
-            <input
-              aria-label="รหัสผู้ดูแล"
-              placeholder="รหัสผู้ดูแล"
-              type="password"
-              value={secret}
-              onChange={(event) => setSecret(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void loadAll();
-              }}
-            />
-            <button className="btn primary" disabled={!secret || busy} onClick={loadAll}>
-              <RefreshCw size={16} />
-              {busy ? "กำลังโหลด" : "โหลดข้อมูล"}
-            </button>
-          </div>
+          <span className="loginLabel">เข้าสู่หลังบ้านอย่างปลอดภัย</span>
+          {adminUser ? (
+            <div className="adminSession">
+              <span className="sessionEmail">
+                <Mail size={16} />
+                {adminUser.email}
+              </span>
+              <div className="actions">
+                <button className="btn primary" disabled={busy} onClick={() => loadAll()}>
+                  <RefreshCw size={16} />
+                  {busy ? "กำลังโหลด" : "โหลดข้อมูล"}
+                </button>
+                <button className="btn subtle" disabled={busy} onClick={logoutAdmin}>
+                  <LogOut size={16} />
+                  ออกจากระบบ
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="loginForm">
+              <input
+                aria-label="อีเมลผู้ดูแล"
+                autoComplete="email"
+                inputMode="email"
+                placeholder="อีเมลผู้ดูแล"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+              <input
+                aria-label="รหัสผ่าน"
+                autoComplete="current-password"
+                placeholder="รหัสผ่าน"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void loginAdmin();
+                }}
+              />
+              <button
+                className="btn primary"
+                disabled={!email.trim() || !password || busy || authChecking}
+                onClick={loginAdmin}
+              >
+                <ShieldCheck size={16} />
+                {busy || authChecking ? "กำลังตรวจสอบ" : "เข้าสู่ระบบ"}
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -468,7 +548,7 @@ export default function Home() {
               <span className="badge">{events.length} งาน</span>
               <button
                 className="btn primary"
-                disabled={!secret || busy}
+                disabled={!adminUser || busy}
                 onClick={() => setCreateEventOpen(true)}
               >
                 <Plus size={16} />
@@ -770,6 +850,9 @@ export default function Home() {
                 <li>NEXT_PUBLIC_SUPABASE_URL</li>
                 <li>SUPABASE_SERVICE_ROLE_KEY</li>
                 <li>SUPABASE_SLIPS_BUCKET</li>
+                <li>ADMIN_EMAIL</li>
+                <li>ADMIN_PASSWORD_HASH</li>
+                <li>ADMIN_SESSION_SECRET</li>
               </ul>
             </div>
             <div className="setupCard">
@@ -794,7 +877,7 @@ export default function Home() {
 
         <section hidden={activePage !== "richmenu"}>
           <RichMenuBuilder
-            secret={secret}
+            isAuthenticated={Boolean(adminUser)}
             busy={busy}
             setBusy={setBusy}
             setError={setError}
