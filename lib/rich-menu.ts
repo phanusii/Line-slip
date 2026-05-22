@@ -113,8 +113,7 @@ export async function generateCompactMenuImage(): Promise<Buffer> {
   const iconY = 115;
   const labelY = 222;
 
-  const emojiFamily = "Segoe UI Emoji,Apple Color Emoji,Noto Color Emoji,sans-serif";
-  const textFamily  = "Arial,Helvetica,sans-serif";
+  const textFamily = "Arial,Helvetica,sans-serif";
 
   // Thai Unicode
   const T_TRANSFER = "&#x0E42;&#x0E2D;&#x0E19;&#x0E40;&#x0E07;&#x0E34;&#x0E19;"; // โอนเงิน
@@ -174,15 +173,39 @@ export async function generateCompactMenuImage(): Promise<Buffer> {
   <rect x="${COL * 2 + CARD_MX}" y="${CARD_MY}" width="${CARD_W}" height="${CARD_H}" rx="${CARD_RX}" fill="url(#pill3)" opacity="0.22"/>
   <rect x="${COL * 2 + CARD_MX}" y="${CARD_MY}" width="${CARD_W}" height="${CARD_H}" rx="${CARD_RX}" fill="none" stroke="#c084fc" stroke-width="1.5" opacity="0.55"/>
 
-  <!-- ── Glow halos behind icons ── -->
-  <circle cx="${cx1}" cy="${iconY - 8}" r="52" fill="#f43f8e" opacity="0.18"/>
-  <circle cx="${cx2}" cy="${iconY - 8}" r="52" fill="#2dd4bf" opacity="0.18"/>
-  <circle cx="${cx3}" cy="${iconY - 8}" r="52" fill="#c084fc" opacity="0.18"/>
+  <!-- ══════════════════════════════════════════════
+       ICON 1 — โอนเงิน  (coin circle + ฿)
+       ══════════════════════════════════════════════ -->
+  <circle cx="${cx1}" cy="100" r="54" fill="#fb7185"/>
+  <circle cx="${cx1}" cy="100" r="54" fill="none" stroke="white" stroke-width="2" opacity="0.35"/>
+  <!-- ฿ symbol: two thin horizontal lines through a B -->
+  <text x="${cx1}" y="120" text-anchor="middle"
+        font-size="58" font-weight="900" fill="white"
+        font-family="Arial,Helvetica,sans-serif">&#x0E3F;</text>
 
-  <!-- ── Emoji icons ── -->
-  <text x="${cx1}" y="${iconY}" text-anchor="middle" font-size="72" font-family="${emojiFamily}">💸</text>
-  <text x="${cx2}" y="${iconY}" text-anchor="middle" font-size="72" font-family="${emojiFamily}">📊</text>
-  <text x="${cx3}" y="${iconY}" text-anchor="middle" font-size="72" font-family="${emojiFamily}">💬</text>
+  <!-- ══════════════════════════════════════════════
+       ICON 2 — สถานะ  (circle + 3-bar chart)
+       ══════════════════════════════════════════════ -->
+  <circle cx="${cx2}" cy="100" r="54" fill="#2dd4bf"/>
+  <circle cx="${cx2}" cy="100" r="54" fill="none" stroke="white" stroke-width="2" opacity="0.35"/>
+  <!-- Bar chart: short / medium / tall -->
+  <rect x="${cx2 - 36}" y="88"  width="18" height="30" rx="4" fill="white"/>
+  <rect x="${cx2 - 9}"  y="74"  width="18" height="44" rx="4" fill="white"/>
+  <rect x="${cx2 + 18}" y="60"  width="18" height="58" rx="4" fill="white"/>
+
+  <!-- ══════════════════════════════════════════════
+       ICON 3 — ติดต่อ  (circle + speech bubble)
+       ══════════════════════════════════════════════ -->
+  <circle cx="${cx3}" cy="100" r="54" fill="#a855f7"/>
+  <circle cx="${cx3}" cy="100" r="54" fill="none" stroke="white" stroke-width="2" opacity="0.35"/>
+  <!-- Bubble body -->
+  <rect x="${cx3 - 36}" y="68" width="72" height="44" rx="11" fill="white"/>
+  <!-- Tail -->
+  <path d="M${cx3 - 18},112 L${cx3 - 30},128 L${cx3 + 2},112 Z" fill="white"/>
+  <!-- Three dots inside bubble -->
+  <circle cx="${cx3 - 18}" cy="90" r="5" fill="#a855f7"/>
+  <circle cx="${cx3}"       cy="90" r="5" fill="#a855f7"/>
+  <circle cx="${cx3 + 18}"  cy="90" r="5" fill="#a855f7"/>
 
   <!-- ── Thai labels ── -->
   <text x="${cx1}" y="${labelY}" text-anchor="middle" font-size="50" font-weight="bold" fill="white" font-family="${textFamily}">${T_TRANSFER}</text>
