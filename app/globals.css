@@ -1276,3 +1276,611 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* Modern dashboard and LIFF refinements */
+:root {
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --surface-strong: #ffffff;
+  --line: #e2e8f0;
+  --text: #172033;
+  --muted: #677389;
+  --brand: #2563eb;
+  --brand-2: #14b8a6;
+  --danger: #dc3545;
+  --warn: #b7791f;
+  --ok: #047857;
+  --shadow: 0 18px 46px rgba(30, 41, 59, 0.08);
+  --shadow-soft: 0 8px 24px rgba(30, 41, 59, 0.06);
+}
+
+body {
+  background:
+    linear-gradient(180deg, rgba(37, 99, 235, 0.05), transparent 260px),
+    linear-gradient(135deg, #f6f7fb 0%, #f9fbff 48%, #f4fbf8 100%);
+}
+
+.page {
+  padding-bottom: 40px;
+}
+
+.hero {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.92);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 520px);
+  margin: 0 0 18px;
+  max-width: none;
+  padding: 15px clamp(16px, 3vw, 34px);
+  width: 100%;
+}
+
+.hero::before,
+.heroGlow,
+.heroPills {
+  display: none;
+}
+
+.brand {
+  gap: 6px;
+  max-width: none;
+}
+
+.brand h1 {
+  font-size: clamp(23px, 2.2vw, 30px);
+  line-height: 1.18;
+}
+
+.brandKicker {
+  color: var(--brand);
+  font-size: 12px;
+}
+
+.brand p {
+  font-size: 13px;
+  max-width: 680px;
+}
+
+.loginCard {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  gap: 8px;
+  padding: 0;
+}
+
+.loginLabel {
+  font-size: 12px;
+}
+
+.loginForm input,
+.field input,
+.field select,
+.field textarea,
+.modal input,
+.modal textarea {
+  border-radius: 9px;
+  min-height: 42px;
+  padding: 9px 12px;
+}
+
+.loginForm input:focus,
+.field input:focus,
+.field select:focus,
+.field textarea:focus,
+.modal input:focus,
+.modal textarea:focus {
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.loginForm {
+  grid-template-columns: minmax(180px, 1fr) minmax(150px, 0.8fr) auto;
+}
+
+.main {
+  gap: 18px;
+  grid-template-columns: 236px minmax(0, 1fr);
+  max-width: none;
+  padding: 0 clamp(14px, 3vw, 34px);
+}
+
+.pageTabs {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
+  gap: 5px;
+  padding: 10px;
+  top: 14px;
+}
+
+.navTitle {
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 2px;
+  margin: 0 2px 6px;
+  padding: 6px 8px 12px;
+}
+
+.navTitle span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.navTitle strong {
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.15;
+}
+
+.pageTabs button {
+  align-items: center;
+  border-radius: 9px;
+  color: #526071;
+  display: grid;
+  font-size: 13px;
+  gap: 9px;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  justify-content: start;
+  min-height: 40px;
+  padding: 9px 10px;
+  position: relative;
+  text-align: left;
+}
+
+.pageTabs button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pageTabs button b {
+  align-items: center;
+  background: #fee2e2;
+  border-radius: 999px;
+  color: #b91c1c;
+  display: inline-flex;
+  font-size: 11px;
+  height: 20px;
+  justify-content: center;
+  min-width: 20px;
+  padding: 0 6px;
+}
+
+.pageTabs button.active {
+  background: #eef6ff;
+  box-shadow: none;
+  color: var(--brand);
+}
+
+.overviewStrip {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  overflow: visible;
+}
+
+.overviewStrip div {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-soft);
+  min-height: 86px;
+  padding: 14px 15px;
+}
+
+.overviewStrip span {
+  font-size: 12px;
+}
+
+.overviewStrip strong {
+  font-size: clamp(22px, 2.4vw, 30px);
+}
+
+.grid {
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.panel,
+.alertPanel {
+  backdrop-filter: none;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
+  padding: 18px;
+}
+
+.panel::before,
+.alertPanel::before {
+  display: none;
+}
+
+.accentMint,
+.accentSky,
+.accentPink,
+.accentReview {
+  background: var(--surface);
+}
+
+.panelHeader {
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.panelHeader h2 {
+  font-size: 18px;
+}
+
+.stat {
+  gap: 10px;
+  min-height: 156px;
+}
+
+.stat strong {
+  font-size: clamp(28px, 3.4vw, 40px);
+}
+
+.tableWrap {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: auto;
+}
+
+.dataTable {
+  min-width: 840px;
+}
+
+.compactTable {
+  min-width: 680px;
+}
+
+th,
+td {
+  padding: 11px 12px;
+}
+
+th {
+  background: #f8fafc;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+tbody tr:hover {
+  background: #f8fbff;
+}
+
+.actions {
+  gap: 7px;
+}
+
+.segmented {
+  background: #f8fafc;
+  border-radius: 10px;
+  gap: 4px;
+  margin: -2px 0 12px;
+  padding: 4px;
+}
+
+.segmented button {
+  border-radius: 8px;
+  font-size: 12px;
+  min-height: 34px;
+}
+
+.segmented button.active {
+  color: var(--brand);
+}
+
+.btn,
+.iconButton {
+  border-color: #d7e0ef;
+  border-radius: 9px;
+  color: var(--brand);
+  font-size: 13px;
+  min-height: 36px;
+  padding: 8px 11px;
+}
+
+.btn:hover,
+.iconButton:hover {
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.11);
+}
+
+.btn.primary {
+  background: var(--brand);
+  min-width: 0;
+}
+
+.btn.danger {
+  background: #fff5f5;
+}
+
+.btn.selected {
+  background: #eef6ff;
+  border-color: #bfdbfe;
+}
+
+.iconButton {
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+.circleIcon {
+  background: #eef6ff;
+  border-color: #bfdbfe;
+  border-radius: 10px;
+  color: var(--brand);
+  height: 38px;
+  width: 38px;
+}
+
+.badge {
+  background: #f8fafc;
+  border-color: #dce4ef;
+  font-size: 11px;
+  min-height: 24px;
+  padding: 4px 9px;
+}
+
+.badge.ok {
+  background: #e9fbf4;
+}
+
+.badge.warn {
+  background: #fff8e6;
+}
+
+.badge.danger {
+  background: #fff1f2;
+}
+
+.detailGrid {
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lineGrid {
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.setupCard {
+  background: #f8fafc;
+  border-radius: 10px;
+  gap: 10px;
+  padding: 14px;
+}
+
+.codeBox {
+  background: #172033;
+  border-radius: 9px;
+  font-size: 12px;
+}
+
+.modal {
+  border-radius: 14px;
+}
+
+.hintBox,
+.emptyState {
+  border-radius: 10px;
+}
+
+.liffShell {
+  align-content: start;
+  max-width: 520px;
+  padding: 8px 9px 76px;
+}
+
+.liffHero,
+.liffCard {
+  border-radius: 12px;
+  gap: 9px;
+  padding: 12px;
+}
+
+.liffHero::before,
+.liffCard::before {
+  background: linear-gradient(90deg, #f9a8d4, #fde68a, #86efac, #7dd3fc);
+  height: 3px;
+}
+
+.liffHero h1 {
+  font-size: 22px;
+}
+
+.liffShell .field input,
+.liffShell .field select {
+  border-radius: 9px;
+  min-height: 40px;
+}
+
+.targetOption {
+  border-radius: 10px;
+  min-height: 50px;
+}
+
+.targetOption.active {
+  background: #eef6ff;
+  border-color: #bfdbfe;
+  box-shadow: none;
+}
+
+.targetOption b,
+.paymentStatusCard strong {
+  color: var(--brand);
+}
+
+.qrCard img {
+  border-radius: 12px;
+  max-width: 236px;
+  padding: 8px;
+  width: min(100%, 236px);
+}
+
+.liffFloatingBar {
+  background: rgba(23, 32, 51, 0.94);
+  border-radius: 14px;
+  bottom: 8px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.25);
+  gap: 4px;
+  left: 8px;
+  padding: 5px;
+  right: 8px;
+}
+
+.liffFloatingBar button,
+.liffFloatingBar a {
+  border-radius: 10px;
+  font-size: 12px;
+  min-height: 34px;
+}
+
+.paymentStatusCard {
+  border-radius: 10px;
+  padding: 11px;
+}
+
+.statusUpload {
+  grid-template-columns: minmax(98px, 0.8fr) minmax(0, 1fr) auto;
+}
+
+.miniUpload,
+.compactBtn {
+  border-radius: 9px;
+  min-height: 34px;
+}
+
+.richPreview,
+.uploadButton {
+  border-radius: 10px;
+}
+
+@media (max-width: 1100px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+
+  .main {
+    grid-template-columns: 1fr;
+  }
+
+  .main > :not(.pageTabs),
+  .pageTabs {
+    grid-column: 1;
+  }
+
+  .pageTabs {
+    position: static;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .navTitle {
+    display: none;
+  }
+
+  .pageTabs button {
+    justify-items: center;
+    grid-template-columns: 1fr;
+    gap: 4px;
+    min-height: 54px;
+    text-align: center;
+  }
+
+  .pageTabs button b {
+    position: absolute;
+    transform: translate(22px, -18px);
+  }
+}
+
+@media (max-width: 780px) {
+  .page {
+    padding-bottom: 24px;
+  }
+
+  .hero {
+    margin: 0 0 12px;
+    padding: 14px 12px;
+  }
+
+  .brand h1 {
+    font-size: 24px;
+  }
+
+  .brand p {
+    font-size: 13px;
+  }
+
+  .main {
+    gap: 12px;
+    padding: 0 10px;
+  }
+
+  .pageTabs {
+    gap: 5px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 7px;
+  }
+
+  .pageTabs button {
+    font-size: 11px;
+    min-height: 49px;
+    padding: 7px 5px;
+  }
+
+  .overviewStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overviewStrip div {
+    min-height: 76px;
+    padding: 12px;
+  }
+
+  .panel,
+  .alertPanel {
+    border-radius: 10px;
+    padding: 14px;
+  }
+
+  .panelHeader {
+    gap: 10px;
+  }
+
+  .panelHeader h2 {
+    font-size: 17px;
+  }
+
+  .actions {
+    gap: 7px;
+  }
+
+  .btn {
+    min-height: 42px;
+  }
+
+  .dataTable {
+    min-width: 700px;
+  }
+
+  .compactTable {
+    min-width: 620px;
+  }
+
+  .statusUpload {
+    grid-template-columns: 1fr;
+  }
+}

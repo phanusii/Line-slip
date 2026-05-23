@@ -14,6 +14,7 @@ import {
   Mail,
   Plus,
   RefreshCw,
+  Settings,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -582,6 +583,22 @@ export default function Home() {
   const totalDue = events.reduce((sum, event) => sum + Number(event.expected_total ?? 0), 0);
   const webhookUrl = `${origin || "https://your-domain.vercel.app"}/api/line/webhook`;
   const liffUrl = `${origin || "https://your-domain.vercel.app"}/liff`;
+  type AdminNavItem = {
+    value: string;
+    label: string;
+    icon: typeof Sparkles;
+    badge?: number | null;
+  };
+  const navItems: AdminNavItem[] = [
+    { value: "overview", label: "ภาพรวม", icon: Sparkles },
+    { value: "events", label: "งานเก็บเงิน", icon: FileSpreadsheet },
+    { value: "targets", label: "รายชื่อ", icon: Users },
+    { value: "slips", label: "สลิป", icon: Bell, badge: pendingReviewTotal || null },
+    { value: "auto", label: "ตรวจอัตโนมัติ", icon: ShieldCheck },
+    { value: "storage", label: "พื้นที่/ล้างข้อมูล", icon: HardDrive },
+    { value: "richmenu", label: "Rich Menu", icon: CheckCircle2 },
+    { value: "line", label: "ตั้งค่า", icon: Settings }
+  ];
   const targetRows =
     detail?.targets.filter((target) => {
       if (targetFilter === "paid") return target.status === "verified";
@@ -703,22 +720,19 @@ export default function Home() {
         {adminUser ? (
           <>
         <nav className="pageTabs" aria-label="เมนูหลังบ้าน">
-          {[
-            ["overview", "ภาพรวม"],
-            ["events", "งานเรียกเก็บเงิน"],
-            ["targets", "รายชื่อ"],
-            ["slips", `สลิปรอตรวจ${pendingReviewTotal ? ` (${pendingReviewTotal})` : ""}`],
-            ["auto", "ตรวจอัตโนมัติ"],
-            ["storage", "พื้นที่/ล้างข้อมูล"],
-            ["richmenu", "Rich Menu"],
-            ["line", "ตั้งค่า LINE"]
-          ].map(([value, label]) => (
+          <div className="navTitle">
+            <span>Admin</span>
+            <strong>Line Slip</strong>
+          </div>
+          {navItems.map(({ value, label, icon: Icon, badge }) => (
             <button
               key={value}
               className={activePage === value ? "active" : ""}
               onClick={() => setActivePage(value)}
             >
-              {label}
+              <Icon size={17} />
+              <span>{label}</span>
+              {badge ? <b>{badge}</b> : null}
             </button>
           ))}
         </nav>
