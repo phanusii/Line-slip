@@ -5,7 +5,8 @@ export type LiffPage = "pay" | "slip" | "me";
 export function appBaseUrl() {
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "https://line-google-line-line-line-line.vercel.app";
+  if (process.env.NODE_ENV === "development") return "http://localhost:3000";
+  throw new Error("ยังไม่ได้ตั้งค่า NEXT_PUBLIC_APP_URL กรุณาเพิ่มตัวแปรนี้ใน environment");
 }
 
 export function liffUri(page?: LiffPage) {
@@ -123,7 +124,7 @@ export async function getLineMessageQuota() {
     limit,
     used,
     remaining,
-    canPush: typeof remaining === "number" && remaining > 0
+    canPush: quota.type === "none" || (typeof remaining === "number" && remaining > 0)
   };
 }
 
