@@ -190,7 +190,6 @@ export default function LiffPaymentPage() {
   useEffect(() => {
     async function boot() {
       if (!liffId) { setBooting(false); return; }
-      setBusy(true);
       setError(null);
       try {
         const activeMode = modeFromUrl();
@@ -205,17 +204,28 @@ export default function LiffPaymentPage() {
 
         const token = window.liff.getAccessToken();
         if (!token) throw new Error("ไม่พบ LINE access token กรุณาเปิดผ่าน LINE อีกครั้ง");
-        const profileData = await window.liff.getProfile();
-        setProfile(profileData);
         setAccessToken(token);
+
+        // Profile + contact are non-critical — fire and forget
+        void window.liff.getProfile().then((p) => setProfile(p)).catch(() => null);
         void jsonFetch<{ contactUrl: string }>("/api/liff/contact", withLineAccessToken(token))
           .then((data) => setContactUrl(data.contactUrl))
           .catch(() => null);
-        await loadMode(activeMode, token);
+
+        // Phase 1 complete — show the UI shell immediately
+        setBooting(false);
+
+        // Phase 2 — load mode data behind a busy indicator, not a full-screen spinner
+        setBusy(true);
+        try {
+          await loadMode(activeMode, token);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        } finally {
+          setBusy(false);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
         setBooting(false);
       }
     }
@@ -392,7 +402,7 @@ export default function LiffPaymentPage() {
       {booting ? (
         <div className="liffLoading">
           <span className="liffSpinner" />
-          <span>กำลังโหลด…</span>
+          <span>กำลังเชื่อมต่อ LINE…</span>
         </div>
       ) : mode === "me" ? (
         <StatusView
@@ -431,7 +441,12 @@ export default function LiffPaymentPage() {
                 />
               </label>
 
-              {selectedEvent ? (
+              {busy && events.length === 0 ? (
+                <div className="liffLoading" style={{ minHeight: 120 }}>
+                  <span className="liffSpinner" />
+                  <span style={{ fontSize: 13, color: "var(--muted)" }}>กำลังโหลดรายการ…</span>
+                </div>
+              ) : selectedEvent ? (
                 <>
                   {!selectedEvent.has_promptpay ? (
                     <div className="hintBox">
@@ -603,7 +618,12 @@ function StatusView(props: {
 
   return (
     <section className="liffCard">
-      {visiblePayments.length ? (
+      {props.busy && visiblePayments.length === 0 ? (
+        <div className="liffLoading" style={{ minHeight: 120 }}>
+          <span className="liffSpinner" />
+          <span style={{ fontSize: 13, color: "var(--muted)" }}>กำลังโหลดสถานะ…</span>
+        </div>
+      ) : visiblePayments.length ? (
         <div className="paymentStatusList">
           {visiblePayments.map((payment) => {
             const latestSlip = payment.slips[0];
