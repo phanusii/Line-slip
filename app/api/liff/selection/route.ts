@@ -1,7 +1,7 @@
 import QRCode from "qrcode";
 import { NextRequest, NextResponse } from "next/server";
 import { formatApiError } from "@/lib/api-error";
-import { getLineProfile, verifyLineAccessToken } from "@/lib/liff";
+import { verifyAndGetProfile } from "@/lib/liff";
 import { buildPromptPayPayload } from "@/lib/promptpay";
 import { createServiceClient } from "@/lib/supabase/server";
 
@@ -20,8 +20,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await verifyLineAccessToken(body.accessToken);
-    const profile = await getLineProfile(body.accessToken);
+    const profile = await verifyAndGetProfile(body.accessToken);
     const supabase = createServiceClient();
 
     const { data: lineUser, error: lineUserError } = await supabase

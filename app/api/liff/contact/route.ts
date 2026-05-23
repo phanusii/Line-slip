@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 import { NextRequest, NextResponse } from "next/server";
 import { formatApiError } from "@/lib/api-error";
 import { requireLineAccessToken } from "@/lib/liff";
