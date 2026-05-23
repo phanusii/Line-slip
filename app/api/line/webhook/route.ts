@@ -171,6 +171,13 @@ export async function POST(request: NextRequest) {
           await replyLine(event.replyToken, [
             { type: "text", text: "❌ สลิปนี้เคยถูกส่งแล้ว ไม่สามารถใช้สลิปซ้ำได้ค่ะ" }
           ]);
+        } else if (slip.status === "verified") {
+          await replyLine(event.replyToken, [
+            {
+              type: "text",
+              text: "✅ ตรวจสลิปผ่านอัตโนมัติจากรูปสลิปแล้วค่ะ หมายเหตุ: เป็นการตรวจจากรูป ไม่ใช่การยืนยันจากธนาคาร"
+            }
+          ]);
         } else {
           await replyLine(event.replyToken, [
             { type: "text", text: "📋 รับสลิปแล้วค่ะ ระบบบันทึกไฟล์เรียบร้อยแล้ว จะแจ้งผลการตรวจสอบให้ทราบภายหลัง" }

@@ -3,6 +3,8 @@ import jsQR from "jsqr";
 import sharp from "sharp";
 import { notifyAdminSlipReview } from "@/lib/admin-review";
 import { STORAGE_BUCKET } from "@/lib/env";
+import { evaluateFreeAutoSlipCheck } from "@/lib/free-auto-slip";
+import { applySlipStatus } from "@/lib/slip-status";
 import { createServiceClient } from "@/lib/supabase/server";
 
 type UploadSlipInput = {
@@ -19,7 +21,9 @@ type UploadSlipInput = {
 
 export type UploadSlipResult = {
   id: string;
-  status: "manual_review" | "duplicate_slip";
+  status: "manual_review" | "duplicate_slip" | "verified";
+  autoCheckStatus?: string | null;
+  autoCheckReasons?: string[];
   duplicateOfId?: string;
 };
 
@@ -36,6 +40,12 @@ export function hashImage(buffer: Buffer) {
 }
 
 export async function readSlipQrRef(buffer: Buffer) {
+  const data = await readSlipQrPayload(buffer);
+  if (!data) return null;
+  return `qr:${crypto.createHash("sha256").update(data).digest("hex")}`;
+}
+
+export async function readSlipQrPayload(buffer: Buffer) {
   const image = await sharp(buffer, { failOn: "none" })
     .rotate()
     .resize({ width: 1400, withoutEnlargement: true })
@@ -50,14 +60,17 @@ export async function readSlipQrRef(buffer: Buffer) {
   );
 
   if (!decoded?.data) return null;
-  return `qr:${crypto.createHash("sha256").update(decoded.data).digest("hex")}`;
+  return decoded.data;
 }
 
 export async function uploadSlipImage(input: UploadSlipInput) {
   const supabase = createServiceClient();
   const normalized = await normalizeSlipImage(input.sourceBuffer);
   const imageHash = hashImage(normalized);
-  const slipRef = await readSlipQrRef(input.sourceBuffer).catch(() => null);
+  const slipQrPayload = await readSlipQrPayload(input.sourceBuffer).catch(() => null);
+  const slipRef = slipQrPayload
+    ? `qr:${crypto.createHash("sha256").update(slipQrPayload).digest("hex")}`
+    : null;
   const now = new Date();
   const datePart = now.toISOString().replace(/[:.]/g, "-");
   const targetSegment = input.paymentTargetId ?? "no-target";
@@ -107,6 +120,11 @@ export async function uploadSlipImage(input: UploadSlipInput) {
         slip_ref: null,
         amount_expected: input.amountExpected ?? null,
         status: "duplicate_slip",
+        auto_check_status: "duplicate_slip",
+        auto_check_reasons: [
+          qrDuplicate.data ? "duplicate_slip_qr" : "duplicate_image_hash"
+        ],
+        auto_checked_at: now.toISOString(),
         rejection_reason: `duplicate ${qrDuplicate.data ? "slip_ref" : "image_hash"} of slip ${duplicate.id}`
       })
       .select("id,status")
@@ -127,6 +145,8 @@ export async function uploadSlipImage(input: UploadSlipInput) {
     return {
       id: duplicateInsert.data.id,
       status: "duplicate_slip",
+      autoCheckStatus: "duplicate_slip",
+      autoCheckReasons: [qrDuplicate.data ? "duplicate_slip_qr" : "duplicate_image_hash"],
       duplicateOfId: duplicate.id
     } satisfies UploadSlipResult;
   }
@@ -172,6 +192,50 @@ export async function uploadSlipImage(input: UploadSlipInput) {
     throw inserted.error;
   }
 
+  const autoCheck = await evaluateFreeAutoSlipCheck({
+    slipId: inserted.data.id,
+    eventId: input.eventId,
+    paymentTargetId: input.paymentTargetId ?? null,
+    lineUserDbId: input.lineUserDbId ?? null,
+    slipRef,
+    normalizedBuffer: normalized,
+    amountExpected: input.amountExpected ?? null
+  });
+
+  const autoCheckUpdated = await supabase
+    .from("slip_submissions")
+    .update({
+      auto_check_status: autoCheck.status,
+      auto_check_reasons: autoCheck.reasons,
+      auto_checked_at: new Date().toISOString(),
+      ocr_result: autoCheck.ocrResult ?? null
+    })
+    .eq("id", inserted.data.id);
+
+  if (autoCheckUpdated.error) throw autoCheckUpdated.error;
+
+  if (autoCheck.shouldVerify) {
+    await applySlipStatus({
+      slipId: inserted.data.id,
+      status: "verified",
+      reason:
+        "ตรวจผ่านอัตโนมัติจากรูปสลิป: QR ไม่ซ้ำ รูปไม่ซ้ำ ยอดเฉพาะรายชื่อ และอยู่ในช่วงเวลาที่กำหนด ไม่ใช่การยืนยันจากธนาคาร",
+      actor: {
+        actor_email: "system-free-auto-review",
+        actor_role: "viewer"
+      },
+      auditAction: "auto_verify_from_slip",
+      source: "free_auto_review"
+    });
+
+    return {
+      id: inserted.data.id,
+      status: "verified",
+      autoCheckStatus: autoCheck.status,
+      autoCheckReasons: autoCheck.reasons
+    } satisfies UploadSlipResult;
+  }
+
   if (input.paymentTargetId) {
     await supabase
       .from("payment_targets")
@@ -188,7 +252,9 @@ export async function uploadSlipImage(input: UploadSlipInput) {
 
   return {
     id: inserted.data.id,
-    status: "manual_review"
+    status: "manual_review",
+    autoCheckStatus: autoCheck.status,
+    autoCheckReasons: autoCheck.reasons
   } satisfies UploadSlipResult;
 }
 

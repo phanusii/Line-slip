@@ -9,6 +9,13 @@ type PaymentTargetInput = {
   note?: unknown;
 };
 
+type NormalizedTarget = {
+  display_name: string;
+  amount_due: number;
+  note: string;
+  amount_from_default: boolean;
+};
+
 function slugify(value: string) {
   const slug = value
     .trim()
@@ -55,7 +62,8 @@ function parseTargetsText(text: string, defaultAmount: number) {
             : lineAmountMatch?.[1].trim() ?? line
           : line,
         amount_due: hasAmount ? maybeAmount : defaultAmount,
-        note: ""
+        note: "",
+        amount_from_default: !hasAmount
       };
     })
     .filter((target) => {
@@ -69,10 +77,36 @@ function normalizeTargets(payload: unknown, defaultAmount: number) {
 
   return payload.map((target) => {
     const input = target as PaymentTargetInput;
+    const amount = parseAmount(input.amount_due);
     return {
       display_name: String(input.display_name ?? "").trim(),
-      amount_due: parseAmount(input.amount_due),
-      note: input.note ? String(input.note).trim() : ""
+      amount_due: Number.isFinite(amount) ? amount : defaultAmount,
+      note: input.note ? String(input.note).trim() : "",
+      amount_from_default: !Number.isFinite(amount)
+    };
+  });
+}
+
+function money(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function applyUniqueAmountSuffix(
+  targets: NormalizedTarget[],
+  defaultAmount: number,
+  enabled: boolean
+) {
+  if (!enabled || !Number.isFinite(defaultAmount) || targets.length > 99) return targets;
+
+  return targets.map((target, index) => {
+    const usesDefaultAmount =
+      target.amount_from_default || money(target.amount_due) === money(defaultAmount);
+
+    if (!usesDefaultAmount) return target;
+
+    return {
+      ...target,
+      amount_due: money(defaultAmount + (index + 1) / 100)
     };
   });
 }
@@ -133,10 +167,15 @@ export async function POST(request: NextRequest) {
     const name = String(body.name ?? "").trim();
     const promptpayId = String(body.promptpay_id ?? "").trim() || null;
     const defaultAmount = parseAmount(body.default_amount);
+    const uniqueAmountSuffix = body.unique_amount_suffix !== false;
     const targetsText = String(body.targets_text ?? "").trim();
     const fromStructuredTargets = normalizeTargets(body.targets, defaultAmount);
     const fromText = targetsText ? parseTargetsText(targetsText, defaultAmount) : [];
-    const rawTargets = fromStructuredTargets.length ? fromStructuredTargets : fromText;
+    const rawTargets = applyUniqueAmountSuffix(
+      fromStructuredTargets.length ? fromStructuredTargets : fromText,
+      defaultAmount,
+      uniqueAmountSuffix
+    );
 
     if (!name) {
       return NextResponse.json({ error: "กรุณากรอกชื่องานเก็บเงิน" }, { status: 400 });
@@ -221,7 +260,8 @@ export async function POST(request: NextRequest) {
         slug,
         promptpay_id: promptpayId,
         expected_total: expectedTotal,
-        target_count: rawTargets.length
+        target_count: rawTargets.length,
+        unique_amount_suffix: uniqueAmountSuffix
       },
       reason: "สร้างงานเก็บเงินจากแดชบอร์ดผู้ดูแล"
     });

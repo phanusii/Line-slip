@@ -67,6 +67,10 @@ create table public.slip_submissions (
   transfer_datetime timestamptz,
   status public.payment_status not null default 'manual_review',
   rejection_reason text,
+  auto_check_status text,
+  auto_check_reasons jsonb not null default '[]'::jsonb,
+  auto_checked_at timestamptz,
+  ocr_result jsonb,
   file_deleted_at timestamptz,
   metadata_deleted_at timestamptz,
   created_at timestamptz not null default now(),
@@ -113,6 +117,7 @@ create index slip_submissions_event_status_idx on public.slip_submissions(event_
 create index slip_submissions_storage_path_idx on public.slip_submissions(storage_path) where storage_path is not null;
 create index slip_submissions_image_hash_idx on public.slip_submissions(image_hash) where image_hash is not null and metadata_deleted_at is null;
 create unique index slip_submissions_slip_ref_unique_idx on public.slip_submissions(slip_ref) where slip_ref is not null and metadata_deleted_at is null;
+create index slip_submissions_auto_check_status_idx on public.slip_submissions(event_id, auto_check_status) where metadata_deleted_at is null;
 create index audit_logs_event_created_idx on public.audit_logs(event_id, created_at desc);
 
 create or replace function public.touch_updated_at()
@@ -203,7 +208,11 @@ insert into public.settings (key, value)
 values
   ('line_push_policy', 'quota_aware'),
   ('admin_review_channel', 'dashboard_only'),
-  ('admin_review_token_ttl_hours', '24')
+  ('admin_review_token_ttl_hours', '24'),
+  ('auto_verify_from_slip_enabled', 'false'),
+  ('auto_verify_window_hours', '24'),
+  ('auto_verify_requires_unique_amount', 'true'),
+  ('auto_verify_ocr_enabled', 'false')
 on conflict (key) do nothing;
 
 -- Returns actual PostgreSQL database size in bytes (accurate, includes indexes and TOAST)

@@ -85,6 +85,17 @@ type EventDetail = {
     file_deleted_at: string | null;
     amount_expected: number | null;
     amount_detected: number | null;
+    auto_check_status: string | null;
+    auto_check_reasons: string[] | null;
+    auto_checked_at: string | null;
+    ocr_result: {
+      enabled?: boolean;
+      available?: boolean;
+      confidence?: number | null;
+      amountMatched?: boolean | null;
+      text?: string;
+      error?: string;
+    } | null;
     created_at: string;
     payment_targets: { display_name: string } | null;
   }>;
@@ -96,10 +107,33 @@ const exampleTargetsText = `สมชาย\t500
 สมหญิง\t500
 มานะ\t500`;
 
+const uniqueTargetsText = `สมชาย
+สมหญิง
+มานะ`;
+
 const cleanupModeLabels: Record<CleanupMode, string> = {
   files: "ลบเฉพาะรูปสลิป",
   files_and_metadata: "ลบรูปและข้อมูลสลิป",
   event: "ปิดงานและล้างข้อมูล"
+};
+
+const autoReasonLabels: Record<string, string> = {
+  auto_verify_disabled: "ยังไม่เปิดตรวจอัตโนมัติ",
+  missing_payment_target: "ไม่มีรายชื่อที่ผูกไว้",
+  missing_slip_qr: "ไม่พบ QR บนสลิป",
+  target_not_found: "ไม่พบรายชื่อ",
+  target_status_verified: "รายชื่อนี้จ่ายแล้ว",
+  target_status_deleted: "รายชื่อนี้ถูกลบแล้ว",
+  target_not_selected_in_liff: "ยังไม่ได้เลือกชื่อผ่าน LIFF",
+  line_user_mismatch: "LINE user ไม่ตรงกับผู้เลือกชื่อ",
+  selection_window_expired: "เกินเวลาหลังสร้าง QR",
+  amount_not_unique_in_event: "ยอดไม่ unique ในงานนี้",
+  ocr_unavailable: "OCR ใช้งานไม่ได้",
+  ocr_low_confidence: "OCR ไม่มั่นใจ",
+  ocr_amount_mismatch: "OCR อ่านยอดไม่ตรง",
+  free_auto_review_passed: "ผ่านทุกเงื่อนไข",
+  duplicate_slip_qr: "QR สลิปซ้ำ",
+  duplicate_image_hash: "รูปสลิปซ้ำ"
 };
 
 function percent(used: number, limit: number) {
@@ -118,6 +152,16 @@ function usageBadge(pct: number) {
   if (pct >= 85) return <span className="badge danger">ใกล้เต็มมาก {pct}%</span>;
   if (pct >= 70) return <span className="badge warn">ใกล้เต็ม {pct}%</span>;
   return null;
+}
+
+function settingEnabled(value: string | undefined, defaultValue = false) {
+  if (value === undefined || value === "") return defaultValue;
+  return value === "true" || value === "1" || value === "enabled";
+}
+
+function autoReasonText(reasons: string[] | null | undefined) {
+  if (!reasons?.length) return "-";
+  return reasons.map((reason) => autoReasonLabels[reason] ?? reason).join(", ");
 }
 
 type AuthUser = {
@@ -175,10 +219,15 @@ export default function Home() {
   const [newEventName, setNewEventName] = useState("");
   const [newPromptpayId, setNewPromptpayId] = useState("");
   const [newDefaultAmount, setNewDefaultAmount] = useState("");
-  const [newTargetsText, setNewTargetsText] = useState(exampleTargetsText);
+  const [newTargetsText, setNewTargetsText] = useState(uniqueTargetsText);
+  const [newUniqueAmountSuffix, setNewUniqueAmountSuffix] = useState(true);
   const [contactUrl, setContactUrl] = useState("");
   const [linePushPolicy, setLinePushPolicy] = useState("quota_aware");
   const [adminReviewChannel, setAdminReviewChannel] = useState("dashboard_only");
+  const [autoVerifyFromSlipEnabled, setAutoVerifyFromSlipEnabled] = useState(false);
+  const [autoVerifyWindowHours, setAutoVerifyWindowHours] = useState("24");
+  const [autoVerifyRequiresUniqueAmount, setAutoVerifyRequiresUniqueAmount] = useState(true);
+  const [autoVerifyOcrEnabled, setAutoVerifyOcrEnabled] = useState(false);
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramChatId, setTelegramChatId] = useState("");
   const [discordWebhookUrl, setDiscordWebhookUrl] = useState("");
@@ -265,6 +314,10 @@ export default function Home() {
       setContactUrl(settings.contact_url ?? "");
       setLinePushPolicy(settings.line_push_policy ?? "quota_aware");
       setAdminReviewChannel(settings.admin_review_channel ?? "dashboard_only");
+      setAutoVerifyFromSlipEnabled(settingEnabled(settings.auto_verify_from_slip_enabled, false));
+      setAutoVerifyWindowHours(settings.auto_verify_window_hours ?? "24");
+      setAutoVerifyRequiresUniqueAmount(settingEnabled(settings.auto_verify_requires_unique_amount, true));
+      setAutoVerifyOcrEnabled(settingEnabled(settings.auto_verify_ocr_enabled, false));
       setTelegramBotToken(settings.telegram_bot_token ?? "");
       setTelegramChatId(settings.telegram_chat_id ?? "");
       setDiscordWebhookUrl(settings.discord_webhook_url ?? "");
@@ -286,6 +339,10 @@ export default function Home() {
           contact_url: contactUrl,
           line_push_policy: linePushPolicy,
           admin_review_channel: adminReviewChannel,
+          auto_verify_from_slip_enabled: String(autoVerifyFromSlipEnabled),
+          auto_verify_window_hours: autoVerifyWindowHours,
+          auto_verify_requires_unique_amount: String(autoVerifyRequiresUniqueAmount),
+          auto_verify_ocr_enabled: String(autoVerifyOcrEnabled),
           telegram_bot_token: telegramBotToken,
           telegram_chat_id: telegramChatId,
           discord_webhook_url: discordWebhookUrl,
@@ -495,7 +552,8 @@ export default function Home() {
             name: newEventName,
             promptpay_id: newPromptpayId,
             default_amount: newDefaultAmount,
-            targets_text: newTargetsText
+            targets_text: newTargetsText,
+            unique_amount_suffix: newUniqueAmountSuffix
           })
         }
       );
@@ -503,7 +561,8 @@ export default function Home() {
       setNewEventName("");
       setNewPromptpayId("");
       setNewDefaultAmount("");
-      setNewTargetsText(exampleTargetsText);
+      setNewTargetsText(uniqueTargetsText);
+      setNewUniqueAmountSuffix(true);
       setSelectedEventId(data.event.id);
       setActivePage("events");
       await loadAll(true);
@@ -649,6 +708,7 @@ export default function Home() {
             ["events", "งานเรียกเก็บเงิน"],
             ["targets", "รายชื่อ"],
             ["slips", `สลิปรอตรวจ${pendingReviewTotal ? ` (${pendingReviewTotal})` : ""}`],
+            ["auto", "ตรวจอัตโนมัติ"],
             ["storage", "พื้นที่/ล้างข้อมูล"],
             ["richmenu", "Rich Menu"],
             ["line", "ตั้งค่า LINE"]
@@ -974,6 +1034,7 @@ export default function Home() {
                       <th>ชื่อ</th>
                       <th>สถานะ</th>
                       <th>ยอด</th>
+                      <th>ตรวจอัตโนมัติ</th>
                       <th>ขนาด</th>
                       <th>วันที่</th>
                       <th>จัดการ</th>
@@ -989,6 +1050,12 @@ export default function Home() {
                           </span>
                         </td>
                         <td>{formatMoney(slip.amount_expected)}</td>
+                        <td>
+                          <span className={slip.auto_check_status === "passed" ? "badge ok" : "badge"}>
+                            {slip.auto_check_status ?? "-"}
+                          </span>
+                          <p className="muted compactReason">{autoReasonText(slip.auto_check_reasons)}</p>
+                        </td>
                         <td>{formatBytes(slip.file_size)}</td>
                         <td>{new Date(slip.created_at).toLocaleString("th-TH")}</td>
                         <td>
@@ -1033,6 +1100,81 @@ export default function Home() {
             </div>
           </section>
         ) : null}
+
+        <section className="panel" hidden={activePage !== "auto"}>
+          <div className="panelHeader">
+            <div>
+              <h2>ตรวจสลิปอัตโนมัติจากรูป</h2>
+              <p className="muted">
+                ใช้ QR บนสลิป, hash กันซ้ำ, ยอดเฉพาะรายชื่อ และเวลาเลือก QR วิธีนี้ไม่ใช่การยืนยันจากธนาคาร
+              </p>
+            </div>
+            <span className={autoVerifyFromSlipEnabled ? "badge warn" : "badge"}>
+              {autoVerifyFromSlipEnabled ? "เปิดใช้งานแบบรับความเสี่ยง" : "ปิดอยู่"}
+            </span>
+          </div>
+
+          <div className="warningBand">
+            <AlertTriangle size={18} />
+            <span>
+              Auto verify นี้ตรวจจากหลักฐานในรูปเท่านั้น ถ้าต้องการยืนยันเงินจริง 100% ต้องใช้ statement หรือ bank API
+            </span>
+          </div>
+
+          <div className="formGrid">
+            <label className="checkField">
+              <input
+                type="checkbox"
+                checked={autoVerifyFromSlipEnabled}
+                onChange={(e) => setAutoVerifyFromSlipEnabled(e.target.checked)}
+              />
+              <span>เปิด auto verify จากรูปสลิป</span>
+            </label>
+            <label className="checkField">
+              <input
+                type="checkbox"
+                checked={autoVerifyRequiresUniqueAmount}
+                onChange={(e) => setAutoVerifyRequiresUniqueAmount(e.target.checked)}
+              />
+              <span>ต้องเป็นยอดเฉพาะรายชื่อในงานเดียวกัน</span>
+            </label>
+            <label className="checkField">
+              <input
+                type="checkbox"
+                checked={autoVerifyOcrEnabled}
+                onChange={(e) => setAutoVerifyOcrEnabled(e.target.checked)}
+              />
+              <span>เปิด OCR ฟรีเป็นด่านเสริม</span>
+            </label>
+            <label className="field">
+              <span>ช่วงเวลาหลังสร้าง QR (ชั่วโมง)</span>
+              <input
+                inputMode="numeric"
+                value={autoVerifyWindowHours}
+                onChange={(e) => setAutoVerifyWindowHours(e.target.value)}
+                placeholder="24"
+              />
+            </label>
+          </div>
+
+          <div className="hintBox">
+            <strong>เงื่อนไขที่ต้องผ่านทั้งหมด</strong>
+            <p>
+              ผู้ปกครองเลือกชื่อผ่าน LIFF, target ยังไม่จ่าย, รูปและ QR ไม่ซ้ำ, พบ QR บนสลิป,
+              ยอดไม่ซ้ำในงานเดียวกัน และส่งภายในเวลาที่ตั้งไว้
+            </p>
+          </div>
+
+          <div className="actions panelActions">
+            <button
+              className="btn primary"
+              disabled={!adminUser || adminUser.role !== "admin" || busy}
+              onClick={saveSettings}
+            >
+              {contactUrlSaved ? "บันทึกแล้ว ✓" : "บันทึกตั้งค่า"}
+            </button>
+          </div>
+        </section>
 
         <section className="panel" hidden={activePage !== "line"}>
           <div className="panelHeader">
@@ -1263,8 +1405,8 @@ export default function Home() {
               <span className="badge ok">สร้างงานใหม่</span>
               <h3>เพิ่มงานเก็บเงิน</h3>
               <p className="muted">
-                วางรายชื่อจาก Google Sheets หรือ Excel ได้เลย ถ้าแต่ละคนยอดต่างกันให้วางเป็น “ชื่อ + ยอดเงิน”
-                ถ้ายอดเท่ากันทุกคนให้กรอกยอดกลางแล้ววางเฉพาะชื่อ
+                วางรายชื่อจาก Google Sheets หรือ Excel ได้เลย ถ้ายอดเท่ากันทุกคนให้กรอกยอดกลาง
+                แล้วระบบจะเติมเศษสตางค์เฉพาะรายชื่อ เช่น 500.01, 500.02
               </p>
             </div>
 
@@ -1297,19 +1439,31 @@ export default function Home() {
               </label>
             </div>
 
+            <label className="checkField">
+              <input
+                type="checkbox"
+                checked={newUniqueAmountSuffix}
+                onChange={(event) => setNewUniqueAmountSuffix(event.target.checked)}
+              />
+              <span>เติมเศษสตางค์เฉพาะรายชื่อจากยอดกลาง</span>
+            </label>
+
             <label className="field">
               <span>รายชื่อและยอดเงิน</span>
               <textarea
                 rows={8}
                 value={newTargetsText}
                 onChange={(event) => setNewTargetsText(event.target.value)}
-                placeholder={"สมชาย\t500\nสมหญิง\t650\nมานะ\t500"}
+                placeholder={"สมชาย\nสมหญิง\nมานะ"}
               />
             </label>
 
             <div className="hintBox">
               <strong>รูปแบบที่รองรับ</strong>
-              <p>สมชาย 500, สมชาย[TAB]500, หรือวางเฉพาะรายชื่อทีละบรรทัดเมื่อกรอกยอดกลางแล้ว</p>
+              <p>
+                แนะนำวางเฉพาะรายชื่อทีละบรรทัดและกรอกยอดกลาง เช่น 500 เพื่อให้ระบบสร้างยอด 500.01-500.35
+                ส่วนรูปแบบเดิม สมชาย 500 หรือ สมชาย[TAB]500 ยังใช้ได้
+              </p>
             </div>
 
             <div className="actions modalActions">

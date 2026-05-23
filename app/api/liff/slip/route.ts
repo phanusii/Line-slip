@@ -95,6 +95,8 @@ export async function POST(request: NextRequest) {
       message:
         slip.status === "duplicate_slip"
           ? "สลิปนี้เคยถูกส่งแล้ว ไม่สามารถใช้สลิปซ้ำได้"
+          : slip.status === "verified"
+            ? "ตรวจสลิปผ่านอัตโนมัติจากรูปสลิปแล้ว โปรดทราบว่านี่ไม่ใช่การยืนยันจากธนาคาร"
           : "รับสลิปแล้ว ระบบบันทึกไฟล์เรียบร้อยแล้ว รอผู้ดูแลตรวจสอบ"
     });
   } catch (error) {
