@@ -1,4 +1,5 @@
 import { actorFromRequest } from "@/lib/auth";
+import { buildApprovalRejectedFlex, buildApprovalVerifiedFlex, liffUri, pushLine } from "@/lib/line";
 import { createServiceClient } from "@/lib/supabase/server";
 
 const finalStatuses = new Set(["verified", "rejected"]);
@@ -121,17 +122,76 @@ async function notifyLineUserAfterReview(input: {
   reason?: string | null;
 }) {
   const supabase = createServiceClient();
+
+  // หา line_users DB id: ให้ความสำคัญ selected_line_user_id ก่อน (ผู้เลือก QR)
+  // ตามด้วย slipLineUserId (ผู้อัปสลิป) — ปกติจะเป็นคนเดียวกัน
+  const lineUserDbId = input.target?.selected_line_user_id ?? input.slipLineUserId ?? null;
+
+  if (!lineUserDbId) {
+    console.log(`[slip-status] notifyLineUserAfterReview: ไม่พบ line_user_id — ข้ามการแจ้งเตือน slipId=${input.slipId}`);
+    return;
+  }
+
+  // แปลง DB uuid → LINE user ID string (Uxxxxxxxx)
+  const { data: lineUser } = await supabase
+    .from("line_users")
+    .select("line_user_id")
+    .eq("id", lineUserDbId)
+    .maybeSingle();
+
+  if (!lineUser?.line_user_id) {
+    console.log(`[slip-status] notifyLineUserAfterReview: ไม่พบ line_user_id ใน DB — ข้ามการแจ้งเตือน slipId=${input.slipId}`);
+    return;
+  }
+
+  const lineUserId = lineUser.line_user_id;
+  const eventRow = Array.isArray(input.target?.events) ? input.target?.events[0] : input.target?.events;
+  const eventName = eventRow?.name ?? "ไม่พบชื่องาน";
+  const displayName = input.target?.display_name ?? "ไม่พบชื่อ";
+  const amountDue = Number(input.target?.amount_due ?? 0);
+
+  let message: unknown;
+  if (input.status === "verified") {
+    message = buildApprovalVerifiedFlex({
+      displayName,
+      eventName,
+      amountDue,
+      paidAt: new Date().toISOString(),
+      liffMeUrl: liffUri("me")
+    });
+  } else {
+    message = buildApprovalRejectedFlex({
+      displayName,
+      eventName,
+      amountDue,
+      reason: input.reason ?? null,
+      liffSlipUrl: liffUri("slip")
+    });
+  }
+
+  const result = await pushLine(lineUserId, [message]);
+
+  if (!result.ok) {
+    throw new Error(`LINE push ไม่สำเร็จ: ${result.error ?? "unknown error"}`);
+  }
+
+  console.log(`[slip-status] ส่งแจ้งเตือน LINE push สำเร็จ → ${lineUserId} status=${input.status} slipId=${input.slipId}`);
+
   await supabase.from("audit_logs").insert({
     actor_email: "system",
     actor_role: "viewer",
-    action: "line_push_disabled",
+    action: "line_push_sent",
     entity_type: "slip_submission",
     entity_id: input.slipId,
     after_data: {
       status: input.status,
-      slip_line_user_id: input.slipLineUserId ?? null,
-      target_line_user_id: input.target?.selected_line_user_id ?? null
+      line_user_id: lineUserId,
+      event_name: eventName,
+      display_name: displayName,
+      amount_due: amountDue
     },
-    reason: "ปิดการแจ้งเตือนผู้ใช้ทาง LINE เพื่อไม่ใช้โควตา Messaging API"
+    reason: input.status === "verified"
+      ? "แจ้งผู้ใช้ทาง LINE ว่าสลิปผ่านการอนุมัติแล้ว"
+      : "แจ้งผู้ใช้ทาง LINE ว่าสลิปไม่ผ่านการตรวจ"
   });
 }

@@ -357,6 +357,250 @@ export function buildNoPaymentStatusFlex(liffPayUrl: string) {
   ]);
 }
 
+// ── Admin-approval push Flex Messages ────────────────────────────────────────
+// These are sent via LINE push API when admin verifies or rejects a slip.
+
+/**
+ * การ์ดแจ้งผลอนุมัติสลิป — ส่ง push เมื่อแอดมิน verify
+ */
+export function buildApprovalVerifiedFlex(opts: {
+  displayName: string;
+  eventName: string;
+  amountDue: number;
+  paidAt: string | null;
+  liffMeUrl: string;
+}) {
+  const dateStr = opts.paidAt
+    ? new Date(opts.paidAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })
+    : new Date().toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" });
+
+  return {
+    type: "flex",
+    altText: `✅ ยืนยันการชำระเงินแล้ว — ${opts.displayName}`,
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#16a34a",
+        paddingAll: "20px",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "✅", size: "xl", flex: 0 },
+              {
+                type: "box",
+                layout: "vertical",
+                margin: "sm",
+                contents: [
+                  { type: "text", text: "ยืนยันการชำระเงินแล้ว", color: "#ffffff", weight: "bold", size: "lg" },
+                  { type: "text", text: opts.eventName, color: "#d1fae5", size: "sm", wrap: true }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        paddingAll: "16px",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "ชื่อ", flex: 1, color: "#64748b", size: "sm" },
+              { type: "text", text: opts.displayName, flex: 2, align: "end", weight: "bold", size: "sm", wrap: true }
+            ]
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "ยอดชำระ", flex: 1, color: "#64748b", size: "sm" },
+              {
+                type: "text",
+                text: `${Number(opts.amountDue).toLocaleString("th-TH")} บาท`,
+                flex: 2,
+                align: "end",
+                weight: "bold",
+                size: "sm",
+                color: "#16a34a"
+              }
+            ]
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "อนุมัติเมื่อ", flex: 1, color: "#64748b", size: "sm" },
+              { type: "text", text: dateStr, flex: 2, align: "end", size: "sm" }
+            ]
+          },
+          { type: "separator", margin: "md" },
+          {
+            type: "text",
+            text: "ขอบคุณที่ร่วมงานและชำระเงินค่ะ 🙏",
+            color: "#16a34a",
+            size: "sm",
+            wrap: true,
+            margin: "md",
+            weight: "bold"
+          },
+          {
+            type: "text",
+            text: "ผู้ดูแลได้ยืนยันการชำระเงินของคุณเรียบร้อยแล้ว",
+            color: "#64748b",
+            size: "xs",
+            wrap: true
+          }
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "12px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#16a34a",
+            height: "sm",
+            action: { type: "uri", label: "📋 ดูสถานะของฉัน", uri: opts.liffMeUrl }
+          }
+        ]
+      },
+      styles: {
+        footer: { separator: true }
+      }
+    }
+  };
+}
+
+/**
+ * การ์ดแจ้งผลปฏิเสธสลิป — ส่ง push เมื่อแอดมิน reject
+ */
+export function buildApprovalRejectedFlex(opts: {
+  displayName: string;
+  eventName: string;
+  amountDue: number;
+  reason: string | null;
+  liffSlipUrl: string;
+}) {
+  return {
+    type: "flex",
+    altText: `❌ สลิปไม่ผ่านการตรวจ — ${opts.displayName}`,
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#dc2626",
+        paddingAll: "20px",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "❌", size: "xl", flex: 0 },
+              {
+                type: "box",
+                layout: "vertical",
+                margin: "sm",
+                contents: [
+                  { type: "text", text: "สลิปไม่ผ่านการตรวจ", color: "#ffffff", weight: "bold", size: "lg" },
+                  { type: "text", text: opts.eventName, color: "#fecaca", size: "sm", wrap: true }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        paddingAll: "16px",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "ชื่อ", flex: 1, color: "#64748b", size: "sm" },
+              { type: "text", text: opts.displayName, flex: 2, align: "end", weight: "bold", size: "sm", wrap: true }
+            ]
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "ยอด", flex: 1, color: "#64748b", size: "sm" },
+              {
+                type: "text",
+                text: `${Number(opts.amountDue).toLocaleString("th-TH")} บาท`,
+                flex: 2,
+                align: "end",
+                size: "sm"
+              }
+            ]
+          },
+          ...(opts.reason
+            ? [
+                { type: "separator" as const, margin: "md" as const },
+                {
+                  type: "box" as const,
+                  layout: "vertical" as const,
+                  margin: "sm" as const,
+                  contents: [
+                    { type: "text" as const, text: "เหตุผล", color: "#64748b", size: "xs" as const },
+                    {
+                      type: "text" as const,
+                      text: opts.reason,
+                      color: "#dc2626",
+                      size: "sm" as const,
+                      wrap: true,
+                      weight: "bold" as const
+                    }
+                  ]
+                }
+              ]
+            : []),
+          { type: "separator" as const, margin: "md" as const },
+          {
+            type: "text" as const,
+            text: "กรุณาตรวจสอบและส่งสลิปใหม่อีกครั้งค่ะ",
+            color: "#64748b",
+            size: "sm",
+            wrap: true,
+            margin: "md" as const
+          }
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "12px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#dc2626",
+            height: "sm",
+            action: { type: "uri", label: "📤 ส่งสลิปใหม่", uri: opts.liffSlipUrl }
+          }
+        ]
+      },
+      styles: {
+        footer: { separator: true }
+      }
+    }
+  };
+}
+
 export function buildCheckStatusFlex(liffMeUrl: string) {
   return {
     type: "flex",
