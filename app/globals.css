@@ -2570,6 +2570,22 @@ tbody tr:hover {
   overflow-wrap: anywhere;
 }
 
+.liffProgress {
+  background: rgba(126, 138, 165, 0.16);
+  border-radius: 999px;
+  height: 7px;
+  margin-top: 7px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.liffProgress span {
+  background: linear-gradient(90deg, #6a5cff, #38bdf8, #5ee6a8);
+  display: block;
+  height: 100%;
+  transition: width 180ms ease;
+}
+
 .statusSlipPreview {
   grid-column: 1 / -1;
 }

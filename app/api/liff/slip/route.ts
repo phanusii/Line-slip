@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { formatApiError } from "@/lib/api-error";
+import { notifyAdminSlipReview } from "@/lib/admin-review";
 import { getLineProfile, verifyLineAccessToken } from "@/lib/liff";
 import { uploadSlipImage } from "@/lib/slips";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -93,8 +94,17 @@ export async function POST(request: NextRequest) {
       amountExpected: Number(target.amount_due),
       sourceBuffer: buffer,
       mimeType: file.type,
-      lineUserDbId: lineUser.id
+      lineUserDbId: lineUser.id,
+      notifyAdmin: false
     });
+
+    if (slip.id && slip.status === "manual_review") {
+      after(async () => {
+        await notifyAdminSlipReview(slip.id!).catch((notifyError) => {
+          console.error("slip review notification failed", notifyError);
+        });
+      });
+    }
 
     return NextResponse.json({
       ok: true,

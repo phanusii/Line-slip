@@ -15,6 +15,7 @@ type UploadSlipInput = {
   mimeType?: string | null;
   lineMessageId?: string | null;
   lineUserDbId?: string | null;
+  notifyAdmin?: boolean;
 };
 
 export type UploadSlipResult = {
@@ -275,9 +276,11 @@ export async function uploadSlipImage(input: UploadSlipInput) {
       .neq("status", "verified");
   }
 
-  await notifyAdminSlipReview(inserted.data.id).catch((notifyError) => {
-    console.error("slip review notification failed", notifyError);
-  });
+  if (input.notifyAdmin !== false) {
+    await notifyAdminSlipReview(inserted.data.id).catch((notifyError) => {
+      console.error("slip review notification failed", notifyError);
+    });
+  }
 
   return {
     id: inserted.data.id,
