@@ -5,6 +5,16 @@ import { applySlipStatus } from "@/lib/slip-status";
 import { createServiceClient } from "@/lib/supabase/server";
 
 type TelegramAction = "verified" | "rejected";
+type EventMenuAction = "targets" | "slips";
+
+const telegramButtons = {
+  events: "📋 งานทั้งหมด",
+  pending: "🔔 สลิปรอตรวจ",
+  latest: "🧾 สลิปล่าสุด",
+  help: "❓ ช่วยเหลือ"
+} as const;
+
+const targetPageSize = 12;
 
 type TelegramChat = {
   id: number | string;
@@ -59,6 +69,25 @@ function tokenSecret(settings: SettingsMap) {
 
 function signBody(body: string, settings: SettingsMap) {
   return crypto.createHmac("sha256", tokenSecret(settings)).update(body).digest("base64url");
+}
+
+function mainKeyboard() {
+  return {
+    keyboard: [
+      [telegramButtons.events, telegramButtons.pending],
+      [telegramButtons.latest, telegramButtons.help]
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+    input_field_placeholder: "เลือกเมนู"
+  };
+}
+
+function messageWithMainKeyboard(payload: Record<string, unknown>) {
+  return {
+    ...payload,
+    reply_markup: mainKeyboard()
+  };
 }
 
 function compactName(user?: TelegramMessage["from"]) {
@@ -128,6 +157,68 @@ function verifyTelegramReviewCallback(token: string, settings: SettingsMap) {
     slipId: slipHexToUuid(slipHex),
     action: actionFromCode(action)
   };
+}
+
+function signEventMenuCallback(input: {
+  eventId: string;
+  action: EventMenuAction;
+  settings: SettingsMap;
+}) {
+  const body = `ev:${slipIdToHex(input.eventId)}:${input.action}`;
+  return `${body}:${signBody(body, input.settings).slice(0, 8)}`;
+}
+
+function signEventPageCallback(input: {
+  eventId: string;
+  type: "targets";
+  page: number;
+  settings: SettingsMap;
+}) {
+  const body = `page:${input.type}:${slipIdToHex(input.eventId)}:${input.page.toString(36)}`;
+  return `${body}:${signBody(body, input.settings).slice(0, 8)}`;
+}
+
+function verifySignedCallback(data: string, settings: SettingsMap) {
+  const parts = data.split(":");
+  if (parts.length < 3) throw new Error("ปุ่ม Telegram ไม่ถูกต้อง");
+  const signature = parts.at(-1);
+  const body = parts.slice(0, -1).join(":");
+  if (!signature) throw new Error("ปุ่ม Telegram ไม่ถูกต้อง");
+
+  const expected = signBody(body, settings).slice(0, 8);
+  const actualSignature = Buffer.from(signature);
+  const expectedSignature = Buffer.from(expected);
+  if (
+    actualSignature.length !== expectedSignature.length ||
+    !crypto.timingSafeEqual(actualSignature, expectedSignature)
+  ) {
+    throw new Error("ปุ่ม Telegram ไม่ถูกต้อง");
+  }
+
+  if (parts[0] === "ev" && parts.length === 4) {
+    const action = parts[2];
+    if (action !== "targets" && action !== "slips") throw new Error("เมนู Telegram ไม่ถูกต้อง");
+    return {
+      kind: "event" as const,
+      eventId: slipHexToUuid(parts[1]),
+      action
+    };
+  }
+
+  if (parts[0] === "page" && parts.length === 5) {
+    const type = parts[1];
+    if (type !== "targets") throw new Error("หน้า Telegram ไม่ถูกต้อง");
+    const page = Number.parseInt(parts[3], 36);
+    if (!Number.isFinite(page) || page < 0) throw new Error("หน้า Telegram ไม่ถูกต้อง");
+    return {
+      kind: "page" as const,
+      type,
+      eventId: slipHexToUuid(parts[2]),
+      page
+    };
+  }
+
+  throw new Error("ปุ่ม Telegram ไม่ถูกต้อง");
 }
 
 export function signTelegramConnectToken(input: {
@@ -320,10 +411,10 @@ export async function sendTelegramTestMessage(settings: SettingsMap) {
   if (!chatIds.length) throw new Error("ยังไม่ได้เชื่อม Telegram chat");
 
   for (const chatId of chatIds) {
-    await callTelegram(settings, "sendMessage", {
+    await callTelegram(settings, "sendMessage", messageWithMainKeyboard({
       chat_id: chatId,
       text: "ทดสอบ Telegram สำเร็จ: ระบบพร้อมแจ้งเตือนสลิปและตรวจจากปุ่มในแชท"
-    });
+    }));
   }
 }
 
@@ -339,7 +430,7 @@ export async function handleTelegramWebhook(update: TelegramUpdate) {
 
 async function handleTelegramCallback(callback: TelegramCallbackQuery) {
   const settings = await getSettings();
-  if (!callback.data?.startsWith("r:")) return;
+  if (!callback.data) return;
   const chatId = callback.message?.chat ? String(callback.message.chat.id) : null;
   if (!chatId || !(await isTrustedChat(chatId, settings))) {
     await callTelegram(settings, "answerCallbackQuery", {
@@ -349,6 +440,13 @@ async function handleTelegramCallback(callback: TelegramCallbackQuery) {
     }).catch(() => null);
     return;
   }
+
+  if (callback.data.startsWith("ev:") || callback.data.startsWith("page:")) {
+    await handleTelegramMenuCallback(callback, chatId, settings);
+    return;
+  }
+
+  if (!callback.data.startsWith("r:")) return;
 
   await callTelegram(settings, "answerCallbackQuery", {
     callback_query_id: callback.id,
@@ -394,6 +492,41 @@ async function handleTelegramCallback(callback: TelegramCallbackQuery) {
   }
 }
 
+async function handleTelegramMenuCallback(
+  callback: TelegramCallbackQuery,
+  chatId: string,
+  settings: SettingsMap
+) {
+  let menuAction: ReturnType<typeof verifySignedCallback>;
+  try {
+    menuAction = verifySignedCallback(callback.data ?? "", settings);
+  } catch (error) {
+    await callTelegram(settings, "answerCallbackQuery", {
+      callback_query_id: callback.id,
+      text: error instanceof Error ? error.message : "ปุ่มนี้ไม่ถูกต้อง",
+      show_alert: true
+    }).catch(() => null);
+    return;
+  }
+
+  await callTelegram(settings, "answerCallbackQuery", {
+    callback_query_id: callback.id,
+    text: "กำลังโหลดข้อมูล..."
+  }).catch(() => null);
+
+  if (menuAction.kind === "event" && menuAction.action === "targets") {
+    await sendTargetsListByEvent(chatId, settings, menuAction.eventId, 0);
+    return;
+  }
+  if (menuAction.kind === "event" && menuAction.action === "slips") {
+    await sendSlipsList(chatId, settings, "event", menuAction.eventId);
+    return;
+  }
+  if (menuAction.kind === "page") {
+    await sendTargetsListByEvent(chatId, settings, menuAction.eventId, menuAction.page);
+  }
+}
+
 async function handleTelegramCommand(message: TelegramMessage) {
   const settings = await getSettings();
   const chatId = String(message.chat.id);
@@ -404,10 +537,10 @@ async function handleTelegramCommand(message: TelegramMessage) {
     const token = args[0].slice("connect_".length);
     const payload = await verifyTelegramConnectToken(token);
     await bindTelegramChat({ chat: message.chat, adminEmail: payload.adminEmail, from: message.from });
-    await callTelegram(settings, "sendMessage", {
+    await callTelegram(settings, "sendMessage", messageWithMainKeyboard({
       chat_id: chatId,
-      text: "เชื่อม Telegram สำเร็จแล้ว ต่อไปสลิปใหม่จะเด้งมาที่แชทนี้ และตรวจด้วยปุ่มอนุมัติ/ปฏิเสธได้"
-    });
+      text: "เชื่อม Telegram สำเร็จแล้ว ใช้ปุ่มด้านล่างเพื่อดูงาน ดูสลิป และตรวจสลิปได้ทันที"
+    }));
     return;
   }
 
@@ -421,20 +554,11 @@ async function handleTelegramCommand(message: TelegramMessage) {
   }
 
   if (command === "/start" || command === "/help") {
-    await callTelegram(settings, "sendMessage", {
-      chat_id: chatId,
-      text: [
-        "คำสั่ง Telegram",
-        "/events ดูงานทั้งหมด",
-        "/targets <รหัสงานหรือชื่องาน> ดูรายชื่อในงาน",
-        "/pending ดูสลิปรอตรวจ",
-        "/slips ดูสลิปล่าสุด"
-      ].join("\n")
-    });
+    await sendTelegramHelp(chatId, settings);
     return;
   }
 
-  if (command === "/events") {
+  if (command === "/events" || text === telegramButtons.events) {
     await sendEventsList(chatId, settings);
     return;
   }
@@ -442,18 +566,33 @@ async function handleTelegramCommand(message: TelegramMessage) {
     await sendTargetsList(chatId, settings, args.join(" "));
     return;
   }
-  if (command === "/pending") {
+  if (command === "/pending" || text === telegramButtons.pending) {
     await sendSlipsList(chatId, settings, "pending");
     return;
   }
-  if (command === "/slips") {
+  if (command === "/slips" || text === telegramButtons.latest) {
     await sendSlipsList(chatId, settings, "latest");
     return;
+  }
+  if (text === telegramButtons.help) {
+    await sendTelegramHelp(chatId, settings);
   }
 }
 
 async function isTrustedChat(chatId: string, settings: SettingsMap) {
   return settings.telegram_chat_id === chatId;
+}
+
+async function sendTelegramHelp(chatId: string, settings: SettingsMap) {
+  await callTelegram(settings, "sendMessage", messageWithMainKeyboard({
+    chat_id: chatId,
+    text: [
+      "เลือกเมนูจากปุ่มด้านล่างได้เลย",
+      `${telegramButtons.events} ดูงานทั้งหมดและเลือกดูรายชื่อ`,
+      `${telegramButtons.pending} เปิดคิวสลิปรอตรวจ`,
+      `${telegramButtons.latest} ดูสลิปล่าสุด`
+    ].join("\n")
+  }));
 }
 
 async function sendEventsList(chatId: string, settings: SettingsMap) {
@@ -462,25 +601,41 @@ async function sendEventsList(chatId: string, settings: SettingsMap) {
     .from("events")
     .select("id,name,slug,is_open,archived_at,expected_total")
     .order("created_at", { ascending: false })
-    .limit(20);
+    .limit(12);
   if (error) throw error;
   const lines = (data ?? []).map((event) => {
     const state = event.archived_at ? "ปิด/ล้างแล้ว" : event.is_open ? "เปิดอยู่" : "ปิดรับ";
-    return `• ${event.name} (${event.slug}) - ${state} - ${Number(event.expected_total ?? 0).toLocaleString("th-TH")} บาท`;
+    return `• ${event.name} - ${state} - ${Number(event.expected_total ?? 0).toLocaleString("th-TH")} บาท`;
   });
+
+  const inlineKeyboard = (data ?? []).map((event) => [
+    {
+      text: `รายชื่อ: ${event.name}`.slice(0, 58),
+      callback_data: signEventMenuCallback({ eventId: event.id, action: "targets", settings })
+    },
+    {
+      text: "สลิป",
+      callback_data: signEventMenuCallback({ eventId: event.id, action: "slips", settings })
+    },
+    {
+      text: "เว็บ",
+      url: appBaseUrl()
+    }
+  ]);
+
   await callTelegram(settings, "sendMessage", {
     chat_id: chatId,
-    text: lines.length ? ["งานทั้งหมด", ...lines, "", "ดูรายชื่อ: /targets <slug>"].join("\n") : "ยังไม่มีงาน"
+    text: lines.length
+      ? ["งานทั้งหมด", ...lines, "", "กดปุ่มใต้ข้อความนี้เพื่อดูรายชื่อหรือสลิปของงาน"].join("\n")
+      : "ยังไม่มีงาน",
+    reply_markup: inlineKeyboard.length ? { inline_keyboard: inlineKeyboard } : mainKeyboard()
   });
 }
 
 async function sendTargetsList(chatId: string, settings: SettingsMap, query: string) {
   const supabase = createServiceClient();
   if (!query) {
-    await callTelegram(settings, "sendMessage", {
-      chat_id: chatId,
-      text: "พิมพ์ /events เพื่อดูรหัสงานก่อน แล้วใช้ /targets <slug>"
-    });
+    await sendEventsList(chatId, settings);
     return;
   }
 
@@ -498,30 +653,96 @@ async function sendTargetsList(chatId: string, settings: SettingsMap, query: str
       item.name.toLowerCase().includes(normalizedQuery)
   );
   if (!event) {
-    await callTelegram(settings, "sendMessage", { chat_id: chatId, text: "ไม่พบงานที่ค้นหา" });
+    await callTelegram(settings, "sendMessage", messageWithMainKeyboard({
+      chat_id: chatId,
+      text: "ไม่พบงานที่ค้นหา กดปุ่มงานทั้งหมดเพื่อเลือกจากรายการ"
+    }));
     return;
   }
 
-  const { data: targets, error } = await supabase
+  await sendTargetsListByEvent(chatId, settings, event.id, 0);
+}
+
+async function sendTargetsListByEvent(
+  chatId: string,
+  settings: SettingsMap,
+  eventId: string,
+  page: number
+) {
+  const supabase = createServiceClient();
+  const { data: event, error: eventError } = await supabase
+    .from("events")
+    .select("id,name")
+    .eq("id", eventId)
+    .maybeSingle();
+  if (eventError) throw eventError;
+  if (!event) {
+    await callTelegram(settings, "sendMessage", messageWithMainKeyboard({
+      chat_id: chatId,
+      text: "ไม่พบงานที่เลือก"
+    }));
+    return;
+  }
+
+  const from = page * targetPageSize;
+  const to = from + targetPageSize - 1;
+  const { data: targets, error, count } = await supabase
     .from("payment_targets")
-    .select("display_name,amount_due,status")
-    .eq("event_id", event.id)
+    .select("display_name,amount_due,status", { count: "exact" })
+    .eq("event_id", eventId)
     .neq("status", "deleted")
     .order("display_name")
-    .limit(80);
+    .range(from, to);
   if (error) throw error;
 
   const lines = (targets ?? []).map(
     (target) =>
       `• ${target.display_name} - ${Number(target.amount_due ?? 0).toLocaleString("th-TH")} บาท - ${target.status}`
   );
+
+  const pageButtons = [];
+  if (page > 0) {
+    pageButtons.push({
+      text: "ก่อนหน้า",
+      callback_data: signEventPageCallback({ eventId, type: "targets", page: page - 1, settings })
+    });
+  }
+  if ((count ?? 0) > to + 1) {
+    pageButtons.push({
+      text: "ถัดไป",
+      callback_data: signEventPageCallback({ eventId, type: "targets", page: page + 1, settings })
+    });
+  }
+
+  const inlineKeyboard = [
+    [
+      {
+        text: "ดูสลิปงานนี้",
+        callback_data: signEventMenuCallback({ eventId, action: "slips", settings })
+      },
+      {
+        text: "เปิดในเว็บ",
+        url: appBaseUrl()
+      }
+    ],
+    ...(pageButtons.length ? [pageButtons] : [])
+  ];
+
   await callTelegram(settings, "sendMessage", {
     chat_id: chatId,
-    text: lines.length ? [`รายชื่อ: ${event.name}`, ...lines].join("\n") : "ยังไม่มีรายชื่อในงานนี้"
+    text: lines.length
+      ? [`รายชื่อ: ${event.name}`, `หน้า ${page + 1}`, ...lines].join("\n")
+      : "ยังไม่มีรายชื่อในงานนี้",
+    reply_markup: { inline_keyboard: inlineKeyboard }
   });
 }
 
-async function sendSlipsList(chatId: string, settings: SettingsMap, mode: "pending" | "latest") {
+async function sendSlipsList(
+  chatId: string,
+  settings: SettingsMap,
+  mode: "pending" | "latest" | "event",
+  eventId?: string
+) {
   const supabase = createServiceClient();
   let query = supabase
     .from("slip_submissions")
@@ -530,14 +751,15 @@ async function sendSlipsList(chatId: string, settings: SettingsMap, mode: "pendi
     .order("created_at", { ascending: false })
     .limit(5);
   if (mode === "pending") query = query.eq("status", "manual_review").is("replaced_by_slip_id", null);
+  if (mode === "event" && eventId) query = query.eq("event_id", eventId);
 
   const { data, error } = await query;
   if (error) throw error;
   if (!data?.length) {
-    await callTelegram(settings, "sendMessage", {
+    await callTelegram(settings, "sendMessage", messageWithMainKeyboard({
       chat_id: chatId,
       text: mode === "pending" ? "ไม่มีสลิปรอตรวจ" : "ยังไม่มีสลิป"
-    });
+    }));
     return;
   }
 

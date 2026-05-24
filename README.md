@@ -42,6 +42,6 @@ node -e "const {scryptSync,randomBytes}=require('crypto');const s=randomBytes(16
 ## แจ้งเตือนแอดมินและผู้ใช้
 
 - หน้าแอดมินมีคิว `สลิปรอตรวจ`, เสียงแจ้งเตือน และ Browser Notification เมื่อเปิด dashboard ค้างไว้
-- ตั้งค่า Telegram หรือ Discord ได้จากหน้า `ตั้งค่า LINE`; Telegram รองรับการเชื่อมบอทจากหน้าเว็บ, แจ้งเตือนรูปสลิปใหม่, ปุ่มอนุมัติ/ปฏิเสธในแชท และคำสั่ง `/events`, `/targets <slug>`, `/pending`, `/slips`
+- ตั้งค่า Telegram หรือ Discord ได้จากหน้า `ตั้งค่า LINE`; Telegram รองรับการเชื่อมบอทจากหน้าเว็บ, แป้นลัดล่างถาวร, แจ้งเตือนรูปสลิปใหม่ และปุ่มอนุมัติ/ปฏิเสธในแชท
 - การแจ้งผลผู้ใช้ทาง LINE ใช้โหมด `quota_aware`: ระบบเช็กโควตา LINE ก่อน push ถ้าไม่เหลือจะไม่ส่ง และให้ LIFF status เป็นแหล่งข้อมูลหลัก
 - ถ้าต้องการปิด push ทั้งหมด ให้ตั้ง `line_push_policy` เป็น `disabled`

@@ -1583,7 +1583,9 @@ export default function Home() {
               ) : (
                 <p className="muted">ยังไม่มี Telegram chat ที่เชื่อมแล้ว</p>
               )}
-              <p className="muted">คำสั่งใน Telegram: /events, /targets &lt;slug&gt;, /pending, /slips</p>
+              <p className="muted">
+                หลังเชื่อมแล้ว Telegram จะแสดงปุ่มลัดด้านล่าง: งานทั้งหมด, สลิปรอตรวจ, สลิปล่าสุด และช่วยเหลือ
+              </p>
             </div>
           </div>
 
