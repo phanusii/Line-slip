@@ -53,10 +53,9 @@ async function buildUserStatusMessages(
   const targetIds = targets.map((target) => target.id);
   const { data: slips, error: slipsError } = await supabase
     .from("slip_submissions")
-    .select("payment_target_id,status,created_at,metadata_deleted_at,replaced_by_slip_id")
+    .select("payment_target_id,status,created_at,metadata_deleted_at")
     .in("payment_target_id", targetIds)
     .is("metadata_deleted_at", null)
-    .is("replaced_by_slip_id", null)
     .order("created_at", { ascending: false });
 
   if (slipsError) throw slipsError;
@@ -89,6 +88,24 @@ async function buildUserStatusMessages(
   });
 
   return [bubbles.length ? buildStatusFlexMessage(bubbles) : buildNoPaymentStatusFlex(liffUri("pay"))];
+}
+
+async function replyUserStatus(
+  supabase: ReturnType<typeof createServiceClient>,
+  replyToken: string,
+  lineUserId?: string
+) {
+  try {
+    await replyLine(replyToken, await buildUserStatusMessages(supabase, lineUserId));
+  } catch (error) {
+    console.error("LINE status reply failed", error);
+    await replyLine(replyToken, [
+      {
+        type: "text",
+        text: "ยังแสดงการ์ดสถานะไม่ได้ในตอนนี้ กรุณากดสถานะอีกครั้งหรือเปิดเมนูส่งสลิป/สถานะใน LIFF"
+      }
+    ]);
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -124,7 +141,7 @@ export async function POST(request: NextRequest) {
 
     if (event.type === "postback" && event.postback?.data === "action=check_status") {
       if (event.replyToken) {
-        await replyLine(event.replyToken, await buildUserStatusMessages(supabase, event.source?.userId));
+        await replyUserStatus(supabase, event.replyToken, event.source?.userId);
       }
       continue;
     }
@@ -135,12 +152,12 @@ export async function POST(request: NextRequest) {
 
     if (
       event.message?.type === "text" &&
-      ["สถานะ", "ดูสถานะ", "ดูสถานะสลิปล่าสุด", "check status"].includes(
+      ["สถานะ", "ดูสถานะ", "ดูสถานะการชำระเงิน", "ดูสถานะสลิปล่าสุด", "check status"].includes(
         (event.message.text ?? "").trim().toLowerCase()
       )
     ) {
       if (event.replyToken) {
-        await replyLine(event.replyToken, await buildUserStatusMessages(supabase, event.source?.userId));
+        await replyUserStatus(supabase, event.replyToken, event.source?.userId);
       }
       continue;
     }

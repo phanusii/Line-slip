@@ -71,7 +71,7 @@ export async function replyLine(replyToken: string, messages: unknown[]) {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
   if (!token) return;
 
-  await fetch("https://api.line.me/v2/bot/message/reply", {
+  const response = await fetch("https://api.line.me/v2/bot/message/reply", {
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`,
@@ -79,6 +79,12 @@ export async function replyLine(replyToken: string, messages: unknown[]) {
     },
     body: JSON.stringify({ replyToken, messages })
   });
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.error("LINE reply failed", response.status, text);
+    throw new Error(text || `LINE reply failed: ${response.status}`);
+  }
 }
 
 export async function pushLine(lineUserId: string, messages: unknown[]) {
