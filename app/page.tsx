@@ -247,6 +247,8 @@ export default function Home() {
     mode: CleanupMode;
     event: EventSummary;
   } | null>(null);
+  const [deleteEventTarget, setDeleteEventTarget] = useState<EventSummary | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [targetFilter, setTargetFilter] = useState("unpaid");
   const [slipFilter, setSlipFilter] = useState("all");
   const [activePage, setActivePage] = useState("overview");
@@ -589,6 +591,29 @@ export default function Home() {
       setDetail(await api<EventDetail>(`/api/admin/events/${eventId}`));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function runDeleteEvent() {
+    if (!deleteEventTarget) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/api/admin/events/${deleteEventTarget.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ confirmName: deleteConfirmName })
+      });
+      setDeleteEventTarget(null);
+      setDeleteConfirmName("");
+      if (selectedEventId === deleteEventTarget.id) {
+        setSelectedEventId("");
+        setDetail(null);
+      }
+      await loadAll(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1059,6 +1084,13 @@ export default function Home() {
                           <Trash2 size={15} />
                           ลบรูป
                         </button>
+                        <button
+                          className="btn danger"
+                          onClick={() => { setDeleteEventTarget(event); setDeleteConfirmName(""); }}
+                        >
+                          <Trash2 size={15} />
+                          ลบงาน
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1121,6 +1153,12 @@ export default function Home() {
                   </button>
                   <button className="btn danger" onClick={() => setCleanup({ mode: "files", event })}>
                     ลบรูป
+                  </button>
+                  <button
+                    className="btn danger"
+                    onClick={() => { setDeleteEventTarget(event); setDeleteConfirmName(""); }}
+                  >
+                    ลบงาน
                   </button>
                 </div>
               </article>
@@ -1255,6 +1293,13 @@ export default function Home() {
                     onClick={() => setCleanup({ mode: "event", event: selectedEvent })}
                   >
                     ปิด/ล้างงาน
+                  </button>
+                  <button
+                    className="btn danger"
+                    onClick={() => { setDeleteEventTarget(selectedEvent); setDeleteConfirmName(""); }}
+                  >
+                    <Trash2 size={15} />
+                    ลบงานออกจากระบบ
                   </button>
                 </div>
               </div>
@@ -1737,6 +1782,49 @@ export default function Home() {
           </section>
         )}
       </main>
+
+      {deleteEventTarget ? (
+        <div className="modalBackdrop">
+          <div className="modal">
+            <div>
+              <span className="badge danger">⚠ ลบถาวร</span>
+              <h3>ลบงานออกจากระบบทั้งหมด</h3>
+            </div>
+            <div className="alertPanel">
+              <p>
+                <strong>{deleteEventTarget.name}</strong> จะถูกลบออกจากระบบถาวร ไม่สามารถกู้คืนได้
+              </p>
+              <ul style={{ margin: "8px 0 0 16px", fontSize: 13 }}>
+                <li>งานหายออกจาก LINE / LIFF ทันที</li>
+                <li>ลบรายชื่อ {deleteEventTarget.target_count} คน</li>
+                <li>ลบสลิป {deleteEventTarget.slip_count} ใบ และไฟล์รูปทั้งหมด</li>
+                <li>ข้อมูล audit log ยังคงอยู่เพื่อประวัติ</li>
+              </ul>
+            </div>
+            <label className="field">
+              <span>พิมพ์ชื่องาน <strong>{deleteEventTarget.name}</strong> เพื่อยืนยัน</span>
+              <input
+                value={deleteConfirmName}
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                placeholder={deleteEventTarget.name}
+                autoFocus
+              />
+            </label>
+            <div className="actions">
+              <button className="btn" onClick={() => { setDeleteEventTarget(null); setDeleteConfirmName(""); }}>
+                ยกเลิก
+              </button>
+              <button
+                className="btn danger"
+                disabled={deleteConfirmName !== deleteEventTarget.name || busy}
+                onClick={runDeleteEvent}
+              >
+                {busy ? "กำลังลบ..." : "ยืนยันลบถาวร"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {cleanup ? (
         <div className="modalBackdrop">
