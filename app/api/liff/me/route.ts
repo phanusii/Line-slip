@@ -3,6 +3,10 @@ import { formatApiError } from "@/lib/api-error";
 import { verifyAndGetProfile } from "@/lib/liff";
 import { createServiceClient } from "@/lib/supabase/server";
 
+// Edge runtime: V8 isolate (~0 ms cold start vs 300–800 ms for Node Lambda).
+// This route uses only fetch-based APIs (Supabase JS + LINE HTTP) — no native modules.
+export const runtime = "edge";
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as { accessToken?: string };

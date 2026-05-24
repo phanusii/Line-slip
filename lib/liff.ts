@@ -23,6 +23,11 @@ export type LineProfile = {
 interface CacheEntry {
   clientId: string;
   expiresAt: number; // epoch ms
+  // Profile fields — populated after first verifyAndGetProfile call.
+  // Lets subsequent calls skip the /v2/profile round-trip (~150 ms saved).
+  userId?: string;
+  displayName?: string;
+  pictureUrl?: string;
 }
 
 const TOKEN_CACHE = new Map<string, CacheEntry>();
@@ -118,14 +123,32 @@ export async function getLineProfile(accessToken: string): Promise<LineProfile> 
   return response.json() as Promise<LineProfile>;
 }
 
-// ── Combined: verify + profile in parallel (saves ~150–200 ms) ───────────────
+// ── Combined: verify + profile (fully cached after first call) ───────────────
 // Use this instead of calling verifyLineAccessToken + getLineProfile separately.
-// When the token is already cached, only getLineProfile makes an external call.
+// First call: verify + getProfile run in parallel (~150–200 ms total).
+// Subsequent warm calls: both token validity AND profile served from cache —
+// zero external LINE API calls until the TTL expires.
 
 export async function verifyAndGetProfile(accessToken: string): Promise<LineProfile> {
+  // Fast-path: full profile in cache — skip both LINE API calls
+  const cached = TOKEN_CACHE.get(accessToken);
+  if (cached && cached.expiresAt > Date.now() && cached.userId) {
+    return { userId: cached.userId, displayName: cached.displayName, pictureUrl: cached.pictureUrl };
+  }
+
+  // Slow-path: verify + getProfile in parallel
   const [, profile] = await Promise.all([
     verifyLineAccessToken(accessToken),
     getLineProfile(accessToken)
   ]);
+
+  // Enrich the cache entry (created by verifyLineAccessToken above) with profile data
+  const entry = TOKEN_CACHE.get(accessToken);
+  if (entry) {
+    entry.userId = profile.userId;
+    entry.displayName = profile.displayName;
+    entry.pictureUrl = profile.pictureUrl;
+  }
+
   return profile;
 }
