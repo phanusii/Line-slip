@@ -1123,14 +1123,16 @@ export default function Home() {
                 <table className="dataTable compactTable">
                   <thead>
                     <tr>
+                      <th>#</th>
                       <th>ชื่อ</th>
                       <th>ยอด</th>
                       <th>สถานะ</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {targetRows.map((target) => (
+                    {targetRows.map((target, idx) => (
                       <tr key={target.id}>
+                        <td style={{ color: "var(--muted)", fontSize: 12, width: 32 }}>{idx + 1}</td>
                         <td>{target.display_name}</td>
                         <td>{formatMoney(target.amount_due)}</td>
                         <td>
@@ -1144,11 +1146,14 @@ export default function Home() {
                 </table>
               </div>
               <div className="mobileCardList mobileOnly">
-                {targetRows.map((target) => (
+                {targetRows.map((target, idx) => (
                   <article className="mobileRecordCard compactMobileCard" key={target.id}>
                     <div className="mobileRecordHeader">
                       <div>
-                        <h3>{target.display_name}</h3>
+                        <h3>
+                          <span style={{ color: "var(--muted)", fontWeight: 500, fontSize: 12, marginRight: 4 }}>{idx + 1}.</span>
+                          {target.display_name}
+                        </h3>
                         <p>{formatMoney(target.amount_due)} บาท</p>
                       </div>
                       <span className={target.status === "verified" ? "badge ok" : "badge warn"}>

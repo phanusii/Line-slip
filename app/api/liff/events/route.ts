@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("events")
       .select(
-        "id,name,slug,promptpay_id,is_open,archived_at,payment_targets(id,display_name,amount_due,status,selected_line_user_id)"
+        "id,name,slug,promptpay_id,is_open,archived_at,payment_targets(id,display_name,amount_due,status,selected_line_user_id,created_at)"
       )
       .eq("is_open", true)
       .is("archived_at", null)
@@ -46,22 +46,28 @@ export async function GET(request: NextRequest) {
     if (error) throw error;
 
     return NextResponse.json({
-      events: data.map((event) => ({
-        id: event.id,
-        name: event.name,
-        slug: event.slug,
-        has_promptpay: Boolean(event.promptpay_id),
-        targets: (event.payment_targets ?? [])
+      events: data.map((event) => {
+        // เรียงตาม created_at จากเก่าไปใหม่ เพื่อรักษาลำดับที่สร้าง
+        const sorted = (event.payment_targets ?? [])
           .filter((target) => target.status !== "verified" && target.status !== "deleted")
-          .sort((a, b) => a.display_name.localeCompare(b.display_name, "th"))
-          .map((target) => ({
+          .sort((a, b) =>
+            new Date(a.created_at as string).getTime() - new Date(b.created_at as string).getTime()
+          );
+        return {
+          id: event.id,
+          name: event.name,
+          slug: event.slug,
+          has_promptpay: Boolean(event.promptpay_id),
+          targets: sorted.map((target, idx) => ({
             id: target.id,
+            order: idx + 1,
             display_name: target.display_name,
             amount_due: Number(target.amount_due),
             status: target.status,
             is_selected: Boolean(target.selected_line_user_id)
           }))
-      }))
+        };
+      })
     });
   } catch (error) {
     if (error instanceof Response) return error;

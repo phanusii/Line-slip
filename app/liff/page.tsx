@@ -33,6 +33,7 @@ type EventRow = {
   has_promptpay: boolean;
   targets: Array<{
     id: string;
+    order: number;
     display_name: string;
     amount_due: number;
     status: string;
@@ -547,7 +548,12 @@ export default function LiffPaymentPage() {
                           }}
                         >
                           <span>
-                            <strong>{target.display_name}</strong>
+                            <strong>
+                              <span style={{ color: "var(--muted)", fontWeight: 500, marginRight: 5, fontSize: 12 }}>
+                                {target.order}.
+                              </span>
+                              {target.display_name}
+                            </strong>
                             <small>{target.is_selected ? "เคยเลือกไว้แล้ว" : statusText[target.status] ?? target.status}</small>
                           </span>
                           <b>{formatMoney(target.amount_due)}</b>
