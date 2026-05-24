@@ -770,9 +770,9 @@ export default function LiffPaymentPage() {
               slipPreviewUrl={slipPreviewUrl}
               uploadState={uploadState}
               busy={busy}
-              liffId={liffId}
               onFile={setSlipFile}
               onUpload={uploadSlip}
+              onViewStatus={() => switchMode("me")}
               onChangeName={() => {
                 setResult(null);
                 setSelectedTargetId("");
@@ -811,56 +811,20 @@ export default function LiffPaymentPage() {
   );
 }
 
-function paymentFromSelection(result: SelectionResult): MyPayment {
-  return {
-    id: result.target.id,
-    display_name: result.target.display_name,
-    amount_due: result.target.amount_due,
-    status: result.target.status ?? "pending_slip",
-    paid_at: null,
-    event: { id: result.event.id, name: result.event.name, slug: "", is_open: true },
-    slips:
-      result.target.status === "manual_review"
-        ? [
-            {
-              id: result.target.id,
-              status: "manual_review",
-              amount_detected: null,
-              amount_expected: result.target.amount_due,
-              created_at: new Date().toISOString(),
-              file_deleted_at: null
-            }
-          ]
-        : []
-  };
-}
-
-function closeWithStatusCard(message?: Record<string, unknown>) {
-  // ส่งการ์ดสถานะด้วย LIFF โดยตรง ไม่ต้องรอ webhook และไม่ใช้ LINE push quota.
-  void window.liff
-    ?.sendMessages(message ? [message] : [{ type: "text", text: "ดูสถานะสลิปล่าสุด" }])
-    .catch(() => null)
-    .finally(() => window.liff?.closeWindow());
-}
-
 function PaymentAndSlipCard(props: {
   result: SelectionResult;
   slipFile: File | null;
   slipPreviewUrl: string | null;
   uploadState: UploadState;
   busy: boolean;
-  liffId: string;
   onFile: (file: File | null) => void;
   onUpload: () => void;
+  onViewStatus: () => void;
   onChangeName: () => void;
 }) {
   const isVerified = props.result.target.status === "verified";
   const uploadAllowed = canUploadSlip(props.result.target.status);
   const currentStatus = props.result.target.status ? statusText[props.result.target.status] ?? props.result.target.status : "สร้าง QR แล้ว";
-  const chatStatusMessage = buildChatStatusMessage([paymentFromSelection(props.result)], {
-    pay: liffDeepLink(props.liffId, "pay"),
-    slip: liffDeepLink(props.liffId, "slip")
-  });
 
   return (
     <section className="liffCard qrCard">
@@ -906,12 +870,12 @@ function PaymentAndSlipCard(props: {
             </div>
           ) : null}
           {props.uploadState.phase === "done" ? (
-            // หลังส่งสลิปสำเร็จ ส่งการ์ดสถานะกลับแชทด้วย LIFF โดยตรง แล้วปิดหน้าต่าง
+            // หลังส่งสลิปสำเร็จให้ดูสถานะใน LIFF โดยตรง เพราะบาง LIFF app ไม่มี chat_message.write
             <button
               className="btn primary liffPrimary"
-              onClick={() => closeWithStatusCard(chatStatusMessage)}
+              onClick={props.onViewStatus}
             >
-              ✅ รับทราบ — ดูสถานะในแชท
+              ✅ รับทราบ — ดูสถานะ
             </button>
           ) : (
             <button
@@ -926,8 +890,8 @@ function PaymentAndSlipCard(props: {
       )}
       {(!uploadAllowed || isVerified) ? (
         // สำหรับกรณีที่เปิด LIFF มาแล้วสลิปอยู่ในสถานะรอตรวจหรือผ่านแล้ว
-        <button className="btn primary liffPrimary" onClick={() => closeWithStatusCard(chatStatusMessage)}>
-          {isVerified ? "✅ ดูสถานะในแชท" : "📋 ดูสถานะในแชท"}
+        <button className="btn primary liffPrimary" onClick={props.onViewStatus}>
+          {isVerified ? "✅ ดูสถานะ" : "📋 ดูสถานะ"}
         </button>
       ) : null}
       <button className="btn subtle liffPrimary" onClick={props.onChangeName}>
