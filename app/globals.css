@@ -2305,3 +2305,354 @@ tbody tr:hover {
     max-width: 100%;
   }
 }
+
+/* Desktop admin shell inspired by minimal tablet dashboards */
+@media (min-width: 1101px) {
+  body {
+    background: #e7ede6;
+  }
+
+  .adminAppPage {
+    background: #e7ede6;
+    display: grid;
+    gap: 14px;
+    grid-template-columns: 252px minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    min-height: 100vh;
+    padding: 18px;
+  }
+
+  .adminAppPage .hero {
+    align-self: stretch;
+    background: #ffffff;
+    border: 1px solid rgba(17, 24, 39, 0.06);
+    border-radius: 24px;
+    box-shadow: none;
+    grid-column: 2;
+    grid-row: 1;
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 86px;
+    padding: 16px 20px;
+  }
+
+  .adminAppPage .brand {
+    gap: 4px;
+  }
+
+  .adminAppPage .brandKicker {
+    color: #6f5eea;
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+
+  .adminAppPage .brand h1 {
+    color: #1f1f1f;
+    font-size: clamp(24px, 2vw, 32px);
+    line-height: 1.08;
+  }
+
+  .adminAppPage .brand p {
+    color: #8b8b8b;
+    font-size: 13px;
+    max-width: 560px;
+  }
+
+  .adminAppPage .loginCard {
+    align-self: center;
+    justify-self: end;
+    min-width: min(520px, 44vw);
+  }
+
+  .adminAppPage .loginLabel {
+    color: #9a9a9a;
+    font-size: 11px;
+  }
+
+  .adminAppPage .adminSession {
+    background: #f6f6f5;
+    border: 1px solid #ececea;
+    border-radius: 18px;
+    gap: 12px;
+    grid-template-columns: minmax(160px, 1fr) auto;
+    padding: 8px;
+  }
+
+  .adminAppPage .sessionEmail {
+    color: #2d2d2d;
+    font-size: 13px;
+    padding-left: 8px;
+  }
+
+  .adminAppPage .main {
+    display: contents;
+  }
+
+  .adminAppPage .main > :not(.pageTabs) {
+    grid-column: 2;
+  }
+
+  .adminAppPage .pageTabs {
+    align-self: start;
+    background: #ffffff;
+    border: 1px solid rgba(17, 24, 39, 0.06);
+    border-radius: 26px;
+    box-shadow: none;
+    grid-column: 1;
+    grid-row: 1 / span 30;
+    min-height: calc(100vh - 36px);
+    padding: 20px 14px;
+    position: sticky;
+    top: 18px;
+  }
+
+  .adminAppPage .navTitle {
+    border: 0;
+    margin: 0 0 30px;
+    padding: 8px 10px;
+  }
+
+  .adminAppPage .navTitle span {
+    color: #9a9a9a;
+    font-size: 12px;
+  }
+
+  .adminAppPage .navTitle strong {
+    color: #202020;
+    font-size: 22px;
+    letter-spacing: 0;
+  }
+
+  .adminAppPage .pageTabs button {
+    border-radius: 18px;
+    color: #4d4d4d;
+    font-size: 14px;
+    font-weight: 750;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    min-height: 50px;
+    padding: 12px 14px;
+  }
+
+  .adminAppPage .pageTabs button.active {
+    background: #202020;
+    color: #ffffff;
+  }
+
+  .adminAppPage .pageTabs button b {
+    background: #9b84f5;
+    color: #ffffff;
+  }
+
+  .adminAppPage .overviewStrip {
+    align-self: start;
+    display: grid;
+    gap: 12px;
+    grid-column: 2;
+    grid-row: 2;
+    grid-template-columns: repeat(5, minmax(130px, 1fr));
+  }
+
+  .adminAppPage .overviewStrip div {
+    background: #ffffff;
+    border: 1px solid rgba(17, 24, 39, 0.06);
+    border-radius: 22px;
+    box-shadow: none;
+    min-height: 104px;
+    padding: 18px;
+  }
+
+  .adminAppPage .overviewStrip span {
+    color: #8c8c8c;
+    font-size: 13px;
+  }
+
+  .adminAppPage .overviewStrip strong {
+    color: #202020;
+    font-size: clamp(25px, 2.2vw, 34px);
+  }
+
+  .adminAppPage .grid {
+    align-items: stretch;
+    display: grid;
+    gap: 14px;
+    grid-column: 2;
+    grid-template-columns: minmax(320px, 1.2fr) repeat(2, minmax(220px, 0.9fr));
+  }
+
+  .adminAppPage .grid .accentReview {
+    grid-row: span 2;
+  }
+
+  .adminAppPage .panel,
+  .adminAppPage .alertPanel,
+  .adminAppPage .toastPanel {
+    background: #ffffff;
+    border: 1px solid rgba(17, 24, 39, 0.06);
+    border-radius: 24px;
+    box-shadow: none;
+    padding: 22px;
+  }
+
+  .adminAppPage .accentMint,
+  .adminAppPage .accentSky,
+  .adminAppPage .accentPink,
+  .adminAppPage .accentReview {
+    background: #ffffff;
+  }
+
+  .adminAppPage .panelHeader h2 {
+    color: #202020;
+    font-size: 22px;
+  }
+
+  .adminAppPage .panelHeader p,
+  .adminAppPage .muted {
+    color: #8b8b8b;
+  }
+
+  .adminAppPage .stat {
+    min-height: 174px;
+  }
+
+  .adminAppPage .stat strong {
+    color: #202020;
+    font-size: clamp(30px, 3.2vw, 46px);
+  }
+
+  .adminAppPage .tableWrap {
+    border: 1px solid #eeeeec;
+    border-radius: 20px;
+  }
+
+  .adminAppPage .dataTable {
+    min-width: 980px;
+  }
+
+  .adminAppPage .compactTable {
+    min-width: 760px;
+  }
+
+  .adminAppPage th {
+    background: #f6f6f5;
+    color: #8b8b8b;
+    font-size: 12px;
+    padding: 13px 14px;
+  }
+
+  .adminAppPage td {
+    border-bottom-color: #eeeeec;
+    color: #262626;
+    padding: 13px 14px;
+  }
+
+  .adminAppPage tbody tr:hover {
+    background: #fafafa;
+  }
+
+  .adminAppPage .btn,
+  .adminAppPage .iconButton,
+  .adminAppPage .uploadButton {
+    background: #ffffff;
+    border-color: #e7e7e4;
+    border-radius: 16px;
+    color: #202020;
+    min-height: 40px;
+    padding: 9px 13px;
+  }
+
+  .adminAppPage .btn:hover,
+  .adminAppPage .iconButton:hover {
+    box-shadow: none;
+    transform: none;
+  }
+
+  .adminAppPage .btn.primary {
+    background: #202020;
+    color: #ffffff;
+  }
+
+  .adminAppPage .btn.subtle {
+    background: #f8f8f7;
+  }
+
+  .adminAppPage .btn.selected {
+    background: #202020;
+    border-color: #202020;
+    color: #ffffff;
+  }
+
+  .adminAppPage .btn.danger {
+    background: #fff5f5;
+    border-color: #ffd9df;
+    color: var(--danger);
+  }
+
+  .adminAppPage .badge {
+    background: #f6f6f5;
+    border-color: #eeeeec;
+    color: #555555;
+  }
+
+  .adminAppPage .badge.ok {
+    background: #e9fbf4;
+    color: var(--ok);
+  }
+
+  .adminAppPage .badge.warn {
+    background: #fff5d6;
+    color: var(--warn);
+  }
+
+  .adminAppPage .badge.danger {
+    background: #fff1f2;
+    color: var(--danger);
+  }
+
+  .adminAppPage .segmented {
+    background: #f6f6f5;
+    border-color: #eeeeec;
+    border-radius: 18px;
+    padding: 5px;
+  }
+
+  .adminAppPage .segmented button {
+    border-radius: 14px;
+    color: #6d6d6d;
+  }
+
+  .adminAppPage .segmented button.active {
+    background: #ffffff;
+    color: #202020;
+  }
+
+  .adminAppPage .detailGrid {
+    grid-column: 2;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .adminAppPage .lineGrid {
+    grid-template-columns: repeat(2, minmax(260px, 1fr));
+  }
+
+  .adminAppPage .setupCard,
+  .adminAppPage .hintBox,
+  .adminAppPage .checkField,
+  .adminAppPage .warningBand {
+    background: #f8f8f7;
+    border-color: #eeeeec;
+    border-radius: 20px;
+  }
+
+  .adminAppPage .codeBox {
+    background: #202020;
+    border-radius: 16px;
+  }
+
+  .adminAppPage .progress {
+    background: #ededeb;
+    height: 10px;
+  }
+
+  .adminAppPage .progress span {
+    background: #9cf0a4;
+  }
+}

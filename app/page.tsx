@@ -617,7 +617,7 @@ export default function Home() {
     }) ?? [];
 
   return (
-    <div className="page">
+    <div className={adminUser ? "page adminAppPage" : "page"}>
       <header className="hero">
         <div className="heroGlow" />
         <div className="brand">
