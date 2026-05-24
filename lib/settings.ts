@@ -14,7 +14,9 @@ export const SETTING_KEYS = [
   "auto_verify_window_hours",
   "auto_verify_requires_unique_amount",
   "auto_verify_ocr_enabled",
-  "auto_verify_ocr_min_confidence"
+  "auto_verify_ocr_min_confidence",
+  "slip_ocr_provider",
+  "slip_ocr_api_key"
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -34,6 +36,11 @@ export function getLinePushPolicy(settings: SettingsMap) {
 export function getAdminReviewChannel(settings: SettingsMap) {
   if (settings.admin_review_channel === "telegram" || settings.admin_review_channel === "discord") {
     return settings.admin_review_channel;
+  }
+  // Auto-upgrade: ถ้ามี Telegram credentials ครบ ส่ง Telegram เสมอ
+  // แม้ admin จะไม่ได้เปลี่ยน admin_review_channel ผ่าน UI
+  if (settings.telegram_bot_token && settings.telegram_chat_id) {
+    return "telegram";
   }
   return "dashboard_only";
 }

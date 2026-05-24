@@ -1,4 +1,5 @@
 import { getBooleanSetting, getNumberSetting, getSettings } from "@/lib/settings";
+import { runSlipOkOcr } from "@/lib/slipok";
 import { createServiceClient } from "@/lib/supabase/server";
 
 type EvaluateInput = {
@@ -101,15 +102,22 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
     "auto_verify_window_hours",
     "auto_verify_requires_unique_amount",
     "auto_verify_ocr_enabled",
-    "auto_verify_ocr_min_confidence"
+    "auto_verify_ocr_min_confidence",
+    "slip_ocr_provider",
+    "slip_ocr_api_key"
   ]);
   const enabled = getBooleanSetting(settings, "auto_verify_from_slip_enabled", false);
   const windowHours = getNumberSetting(settings, "auto_verify_window_hours", 24);
   const requiresUniqueAmount = getBooleanSetting(settings, "auto_verify_requires_unique_amount", true);
   const ocrEnabled = getBooleanSetting(settings, "auto_verify_ocr_enabled", false);
   const ocrMinConfidence = getNumberSetting(settings, "auto_verify_ocr_min_confidence", 45);
+  const ocrProvider = settings.slip_ocr_provider ?? "free";
+  const ocrApiKey = settings.slip_ocr_api_key ?? "";
 
-  const reasons: string[] = [];
+  // blockingReasons = ปัญหาเชิงโครงสร้าง (user/target/window/QR) → block auto-verify เสมอ
+  // ocrReasons = ปัญหา OCR → block ก็ต่อเมื่อ OCR เปิดอยู่เท่านั้น
+  const blockingReasons: string[] = [];
+  const ocrReasons: string[] = [];
   let ocrResult: OcrResult | undefined;
 
   if (!enabled) {
@@ -120,12 +128,12 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
     };
   }
 
-  if (!input.paymentTargetId) reasons.push("missing_payment_target");
-  if (!input.slipRef) reasons.push("missing_slip_qr");
-  if (!input.lineUserDbId) reasons.push("missing_line_user");
+  if (!input.paymentTargetId) blockingReasons.push("missing_payment_target");
+  if (!input.slipRef) blockingReasons.push("missing_slip_qr");
+  if (!input.lineUserDbId) blockingReasons.push("missing_line_user");
 
   if (!input.paymentTargetId) {
-    return { shouldVerify: false, status: "manual_review", reasons };
+    return { shouldVerify: false, status: "manual_review", reasons: blockingReasons };
   }
 
   const { data: target, error: targetError } = await supabase
@@ -137,22 +145,22 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
   if (targetError) throw targetError;
 
   if (!target) {
-    reasons.push("target_not_found");
+    blockingReasons.push("target_not_found");
   } else {
     if (target.status === "verified" || target.status === "deleted") {
-      reasons.push(`target_status_${target.status}`);
+      blockingReasons.push(`target_status_${target.status}`);
     }
     if (!target.selected_line_user_id) {
-      reasons.push("target_not_selected_in_liff");
+      blockingReasons.push("target_not_selected_in_liff");
     }
     if (input.lineUserDbId && target.selected_line_user_id !== input.lineUserDbId) {
-      reasons.push("line_user_mismatch");
+      blockingReasons.push("line_user_mismatch");
     }
 
     const selectedAt = new Date(String(target.updated_at)).getTime();
     const ageMs = Date.now() - selectedAt;
     if (!Number.isFinite(selectedAt) || ageMs > windowHours * 60 * 60 * 1000) {
-      reasons.push("selection_window_expired");
+      blockingReasons.push("selection_window_expired");
     }
 
     if (requiresUniqueAmount) {
@@ -165,31 +173,37 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
 
       if (countError) throw countError;
       if ((count ?? 0) !== 1) {
-        reasons.push("amount_not_unique_in_event");
+        blockingReasons.push("amount_not_unique_in_event");
       }
     }
   }
 
-  if (!ocrEnabled) {
-    reasons.push("ocr_disabled");
-  } else {
-    ocrResult = await runFreeOcr(input.normalizedBuffer, input.amountExpected, ocrMinConfidence);
+  // OCR check — เป็น "soft check" บล็อกก็ต่อเมื่อ ocrEnabled เท่านั้น
+  // ถ้า OCR ปิดอยู่ → ระบบยังตรวจอัตโนมัติจาก QR+user+window+uniqueness ได้
+  if (ocrEnabled) {
+    ocrResult =
+      ocrProvider === "slipok" && ocrApiKey
+        ? await runSlipOkOcr(input.normalizedBuffer, input.amountExpected, ocrApiKey)
+        : await runFreeOcr(input.normalizedBuffer, input.amountExpected, ocrMinConfidence);
+
     if (!ocrResult.available) {
-      reasons.push("ocr_unavailable");
+      ocrReasons.push("ocr_unavailable");
     } else if ((ocrResult.confidence ?? 0) < ocrMinConfidence) {
-      reasons.push("ocr_low_confidence");
+      ocrReasons.push("ocr_low_confidence");
     } else if (!ocrResult.amounts?.length) {
-      reasons.push("ocr_amount_missing");
+      ocrReasons.push("ocr_amount_missing");
     } else if (ocrResult.amountMatched === false) {
-      reasons.push("ocr_amount_mismatch");
+      ocrReasons.push("ocr_amount_mismatch");
     }
   }
 
-  if (reasons.length) {
+  const allReasons = [...blockingReasons, ...ocrReasons];
+
+  if (allReasons.length) {
     return {
       shouldVerify: false,
       status: "manual_review",
-      reasons,
+      reasons: allReasons,
       ocrResult,
       amountDetected: ocrResult?.selectedAmount ?? null
     };
