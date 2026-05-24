@@ -136,6 +136,8 @@ export async function notifyAdminSlipReview(slipId: string) {
       await sendDiscordReview(settings, message, imageUrl, verifiedUrl, rejectedUrl);
     }
 
+    console.log(`[admin-review] ส่งแจ้งเตือน ${channel} สำเร็จ slipId=${slipId}`);
+
     await supabase.from("audit_logs").insert({
       actor_email: "system",
       actor_role: "viewer",
@@ -147,6 +149,8 @@ export async function notifyAdminSlipReview(slipId: string) {
       reason: "แจ้งแอดมินให้ตรวจสลิปใหม่"
     });
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[admin-review] ส่งแจ้งเตือน ${channel} ล้มเหลว slipId=${slipId}: ${errorMsg}`);
     await supabase.from("audit_logs").insert({
       actor_email: "system",
       actor_role: "viewer",
@@ -154,9 +158,10 @@ export async function notifyAdminSlipReview(slipId: string) {
       entity_type: "slip_submission",
       entity_id: slipId,
       event_id: slip.event_id,
-      after_data: { channel, error: error instanceof Error ? error.message : String(error) },
+      after_data: { channel, error: errorMsg },
       reason: "แจ้งแอดมินให้ตรวจสลิปใหม่ไม่สำเร็จ"
     });
+    throw error; // re-throw เพื่อให้ caller รู้ว่าล้มเหลว
   }
 }
 

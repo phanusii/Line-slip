@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   Clock3,
   Download,
-  Eye,
   FileSpreadsheet,
   HardDrive,
   LogOut,
@@ -249,8 +248,8 @@ export default function Home() {
   } | null>(null);
   const [deleteEventTarget, setDeleteEventTarget] = useState<EventSummary | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
-  const [targetFilter, setTargetFilter] = useState("unpaid");
-  const [slipFilter, setSlipFilter] = useState("all");
+  const [targetFilter, setTargetFilter] = useState("review");
+  const [slipFilter, setSlipFilter] = useState("review");
   const [activePage, setActivePage] = useState("overview");
   const [origin, setOrigin] = useState("");
   const [confirmName, setConfirmName] = useState("");
@@ -1174,8 +1173,8 @@ export default function Home() {
             <div className="panel" hidden={activePage !== "targets"}>
               <div className="panelHeader">
                 <div>
-                  <h2>รายชื่อการชำระเงิน</h2>
-                  <p className="muted">{selectedEvent.name}</p>
+                  <h2>{selectedEvent.name}</h2>
+                  <p className="muted">รายชื่อการชำระเงิน</p>
                 </div>
                 <span className="circleIcon">
                   <Users size={20} />
@@ -1183,9 +1182,9 @@ export default function Home() {
               </div>
               <div className="segmented">
                 {[
+                  ["review", "รอตรวจ"],
                   ["unpaid", "ยังไม่จ่าย"],
                   ["paid", "จ่ายแล้ว"],
-                  ["review", "รอตรวจ"],
                   ["all", "ทั้งหมด"]
                 ].map(([value, label]) => (
                   <button
@@ -1269,19 +1268,22 @@ export default function Home() {
             <div className="panel" hidden={activePage !== "slips"}>
               <div className="panelHeader">
                 <div>
-                  <h2>ไฟล์สลิป</h2>
-                  <p className="muted">ดูรูปสลิปแบบ gallery รวมสลิปล่าสุด สลิปซ้ำ และประวัติของแต่ละรายชื่อ</p>
+                  <h2>{selectedEvent.name}</h2>
+                  <p className="muted">ไฟล์สลิป</p>
                 </div>
-                <div className="actions">
-                  <button
-                    className="btn subtle"
-                    onClick={() =>
-                      authenticatedDownload(`/api/admin/events/${selectedEvent.id}/unpaid.csv`)
-                    }
-                  >
-                    <FileSpreadsheet size={15} />
-                    รายชื่อค้างจ่าย
-                  </button>
+                <button
+                  className="btn subtle"
+                  onClick={() =>
+                    authenticatedDownload(`/api/admin/events/${selectedEvent.id}/unpaid.csv`)
+                  }
+                >
+                  <FileSpreadsheet size={15} />
+                  <span className="desktopOnly">รายชื่อค้างจ่าย</span>
+                </button>
+              </div>
+              <details className="manageSection">
+                <summary>⚙ จัดการงาน</summary>
+                <div className="manageActions">
                   <button
                     className="btn danger"
                     onClick={() => setCleanup({ mode: "files_and_metadata", event: selectedEvent })}
@@ -1302,14 +1304,14 @@ export default function Home() {
                     ลบงานออกจากระบบ
                   </button>
                 </div>
-              </div>
+              </details>
               <div className="segmented">
                 {[
-                  ["all", "ทั้งหมด"],
                   ["review", "รอตรวจ"],
+                  ["all", "ทั้งหมด"],
                   ["paid", "จ่ายแล้ว"],
                   ["duplicate", "สลิปซ้ำ"],
-                  ["history", "ประวัติ/ถูกแทนที่"],
+                  ["history", "ประวัติ"],
                   ["problem", "มีปัญหา"]
                 ].map(([value, label]) => (
                   <button
@@ -1402,20 +1404,16 @@ export default function Home() {
                           </details>
                         ) : null}
                         <div className="slipActions">
-                          <button className="btn subtle" disabled={!canOpen} onClick={() => openSlip(slip)}>
-                            <Eye size={15} />
-                            เปิด
-                          </button>
                           <button
-                            className="btn subtle"
+                            className="btn subtle slipDownloadBtn"
                             disabled={!canOpen}
                             onClick={() => authenticatedDownload(`/api/admin/slips/${slip.id}/download`)}
+                            title="ดาวน์โหลด"
                           >
                             <Download size={15} />
-                            โหลด
                           </button>
                           <button
-                            className="btn subtle"
+                            className="btn ok"
                             disabled={busy || !canReviewSlip(slip)}
                             onClick={() => updateSlipStatus(slip.id, "verified")}
                           >

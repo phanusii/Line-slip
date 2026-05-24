@@ -180,6 +180,100 @@ export function buildVerifiedStatusFlex(opts: {
   };
 }
 
+/**
+ * การ์ดสถานะสลิป — แสดงสถานะปัจจุบัน (pending/verified/rejected)
+ * ใช้ reply message (ฟรี) ไม่ใช้ push
+ */
+export function buildSlipStatusFlex(opts: {
+  displayName: string;
+  eventName: string;
+  amountDue: number;
+  /** "verified" | "manual_review" | "rejected" | "pending_slip" | "unpaid" */
+  status: string;
+  submittedAt: string | null;
+  paidAt?: string | null;
+}) {
+  const statusConfig: Record<string, { color: string; label: string }> = {
+    verified:      { color: "#16a34a", label: "✅ อนุมัติแล้ว" },
+    rejected:      { color: "#dc2626", label: "❌ ไม่ผ่าน" },
+    manual_review: { color: "#d97706", label: "⏳ รอตรวจ" },
+    pending_slip:  { color: "#6b7280", label: "📤 รอส่งสลิป" },
+    unpaid:        { color: "#6b7280", label: "📤 รอส่งสลิป" }
+  };
+
+  const cfg = statusConfig[opts.status] ?? statusConfig["manual_review"];
+  const isVerified = opts.status === "verified";
+  const dateField = isVerified ? (opts.paidAt ?? opts.submittedAt) : opts.submittedAt;
+  const dateLabel = isVerified ? "อนุมัติเมื่อ" : "ส่งเมื่อ";
+  const dateStr = dateField
+    ? new Date(dateField).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })
+    : null;
+
+  return {
+    type: "flex",
+    altText: `${cfg.label} — ${opts.displayName} ${Number(opts.amountDue).toLocaleString("th-TH")} บาท`,
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: cfg.color,
+        paddingAll: "16px",
+        contents: [
+          { type: "text", text: cfg.label, color: "#ffffff", weight: "bold", size: "lg" }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        contents: [
+          { type: "text", text: opts.displayName, weight: "bold", size: "lg", wrap: true },
+          { type: "text", text: opts.eventName, color: "#888888", size: "sm", wrap: true },
+          { type: "separator", margin: "md" },
+          {
+            type: "box", layout: "horizontal", margin: "md",
+            contents: [
+              { type: "text", text: "ยอดเงิน", flex: 1, color: "#555555", size: "sm" },
+              {
+                type: "text",
+                text: `${Number(opts.amountDue).toLocaleString("th-TH")} บาท`,
+                flex: 2, align: "end", weight: "bold", size: "sm"
+              }
+            ]
+          },
+          ...(dateStr
+            ? [{
+                type: "box" as const, layout: "horizontal" as const,
+                contents: [
+                  { type: "text", text: dateLabel, flex: 1, color: "#555555", size: "sm" },
+                  { type: "text", text: dateStr, flex: 2, align: "end" as const, size: "sm" as const }
+                ]
+              }]
+            : [])
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          {
+            type: "button",
+            style: "secondary",
+            height: "sm",
+            action: {
+              type: "postback",
+              label: "🔄 รีเฟรชสถานะ",
+              data: "action=check_status",
+              displayText: "ดูสถานะการชำระเงิน"
+            }
+          }
+        ]
+      }
+    }
+  };
+}
+
 export function buildCheckStatusFlex(liffMeUrl: string) {
   return {
     type: "flex",

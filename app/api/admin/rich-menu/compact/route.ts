@@ -49,7 +49,13 @@ export async function POST(request: NextRequest) {
         },
         {
           bounds: { x: 0, y: row, width: col, height: H - row },
-          action: { type: "uri", label: "สถานะ", uri: liffUri("me") }
+          // postback ฟรี (reply) — แสดงการ์ดสถานะในแชทโดยไม่ต้องเปิด LIFF
+          action: {
+            type: "postback",
+            label: "สถานะ",
+            data: "action=check_status",
+            displayText: "ดูสถานะการชำระเงิน"
+          }
         },
         {
           bounds: { x: col, y: row, width: W - col, height: H - row },

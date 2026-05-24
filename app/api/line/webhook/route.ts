@@ -3,7 +3,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { downloadLineContent, uploadSlipImage } from "@/lib/slips";
 import {
   buildCheckStatusFlex,
-  buildVerifiedStatusFlex,
+  buildSlipStatusFlex,
   lineMenuMessages,
   liffUri,
   replyLine,
@@ -14,9 +14,81 @@ type LineEvent = {
   type: string;
   replyToken?: string;
   source?: { userId?: string };
-  message?: { id: string; type: string };
+  message?: { id: string; type: string; text?: string };
   postback?: { data: string; displayText?: string };
 };
+
+/** ดึงสถานะสลิปล่าสุดของผู้ใช้ แล้วสร้าง reply message (ฟรี — ไม่ใช้ push) */
+async function buildStatusReply(
+  lineUserId: string
+): Promise<unknown[]> {
+  const supabase = createServiceClient();
+
+  const { data: lineUser } = await supabase
+    .from("line_users")
+    .select("id")
+    .eq("line_user_id", lineUserId)
+    .maybeSingle();
+
+  if (!lineUser) return [buildCheckStatusFlex(liffUri("me"))];
+
+  // รายชื่อที่เลือกล่าสุด (ทุกสถานะยกเว้น deleted)
+  const { data: target } = await supabase
+    .from("payment_targets")
+    .select("id,display_name,amount_due,status,paid_at,events(name)")
+    .eq("selected_line_user_id", lineUser.id)
+    .neq("status", "deleted")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!target) return [buildCheckStatusFlex(liffUri("me"))];
+
+  const eventRow = Array.isArray(target.events) ? target.events[0] : target.events;
+  const eventName = eventRow?.name ?? "";
+
+  // ถ้า verified ใช้ข้อมูล target โดยตรง
+  if (target.status === "verified") {
+    return [
+      buildSlipStatusFlex({
+        displayName: target.display_name,
+        eventName,
+        amountDue: Number(target.amount_due),
+        status: "verified",
+        submittedAt: null,
+        paidAt: target.paid_at ?? null
+      })
+    ];
+  }
+
+  // ดึงสลิปล่าสุดที่ยังไม่ถูกแทนที่ เพื่อหาวันที่ส่งและสถานะล่าสุด
+  const { data: latestSlip } = await supabase
+    .from("slip_submissions")
+    .select("status,created_at")
+    .eq("payment_target_id", target.id)
+    .is("metadata_deleted_at", null)
+    .is("replaced_by_slip_id", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // กำหนดสถานะที่จะแสดงบนการ์ด
+  const displayStatus =
+    latestSlip?.status === "rejected" ? "rejected"
+    : latestSlip ? "manual_review"
+    : target.status; // pending_slip / unpaid
+
+  return [
+    buildSlipStatusFlex({
+      displayName: target.display_name,
+      eventName,
+      amountDue: Number(target.amount_due),
+      status: displayStatus,
+      submittedAt: latestSlip?.created_at ?? null,
+      paidAt: null
+    })
+  ];
+}
 
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
@@ -52,43 +124,25 @@ export async function POST(request: NextRequest) {
     if (event.type === "postback" && event.postback?.data === "action=check_status") {
       const lineUserId = event.source?.userId;
       if (lineUserId && event.replyToken) {
-        const { data: lineUser } = await supabase
-          .from("line_users")
-          .select("id")
-          .eq("line_user_id", lineUserId)
-          .single();
-
-        const verifiedTarget = lineUser
-          ? await supabase
-              .from("payment_targets")
-              .select("display_name,amount_due,paid_at,events(name)")
-              .eq("selected_line_user_id", lineUser.id)
-              .eq("status", "verified")
-              .order("paid_at", { ascending: false })
-              .limit(1)
-              .single()
-          : null;
-
-        if (verifiedTarget?.data) {
-          const t = verifiedTarget.data;
-          const ev = t.events as { name?: string } | Array<{ name?: string }> | null;
-          const eventName = Array.isArray(ev) ? ev[0]?.name : ev?.name;
-          await replyLine(event.replyToken, [
-            buildVerifiedStatusFlex({
-              displayName: t.display_name,
-              eventName: eventName ?? "",
-              amountDue: Number(t.amount_due),
-              paidAt: t.paid_at ?? null
-            })
-          ]);
-        } else {
-          await replyLine(event.replyToken, [buildCheckStatusFlex(liffUri("me"))]);
-        }
+        const messages = await buildStatusReply(lineUserId);
+        await replyLine(event.replyToken, messages);
       }
       continue;
     }
 
     if (event.type !== "message") {
+      continue;
+    }
+
+    // Text trigger จาก liff.sendMessages() หลังส่งสลิป — reply ด้วยการ์ดสถานะ (ฟรี)
+    if (
+      event.message?.type === "text" &&
+      event.message.text === "ดูสถานะสลิปล่าสุด" &&
+      event.source?.userId &&
+      event.replyToken
+    ) {
+      const messages = await buildStatusReply(event.source.userId);
+      await replyLine(event.replyToken, messages);
       continue;
     }
 

@@ -267,6 +267,8 @@ export async function uploadSlipImage(input: UploadSlipInput) {
     }
   }
 
+  // runAutoReview ทำแค่ OCR + auto-verify — ไม่รับผิดชอบส่งแจ้งเตือน
+  // (notification ถูกย้ายออกมาเรียก synchronous เพื่อความน่าเชื่อถือ)
   async function runAutoReview() {
     const autoCheck = await evaluateFreeAutoSlipCheck({
       slipId: inserted.data.id,
@@ -306,18 +308,10 @@ export async function uploadSlipImage(input: UploadSlipInput) {
         auditAction: "auto_verify_from_slip",
         source: "free_auto_review"
       });
-
-      return {
-        status: "verified" as const,
-        autoCheckStatus: autoCheck.status,
-        autoCheckReasons: autoCheck.reasons
-      };
     }
 
-    await notifyAdminSlipReview(inserted.data.id);
-
     return {
-      status: "manual_review" as const,
+      shouldVerify: autoCheck.shouldVerify,
       autoCheckStatus: autoCheck.status,
       autoCheckReasons: autoCheck.reasons
     };
@@ -336,15 +330,19 @@ export async function uploadSlipImage(input: UploadSlipInput) {
   }
 
   if (input.deferAutoReview) {
+    // OCR + auto-verify ทำใน background (อาจช้า — tesseract, DB queries)
     after(async () => {
       try {
         await runAutoReview();
       } catch (error) {
         console.error("deferred slip auto review failed", error);
-        await notifyAdminSlipReview(inserted.data.id).catch((notifyError) => {
-          console.error("fallback slip review notification failed", notifyError);
-        });
       }
+    });
+
+    // แจ้งเตือน admin แบบ synchronous ก่อนส่ง response กลับ
+    // — ไม่ผ่าน after() เพราะบน Vercel Hobby/Pro อาจถูก kill ก่อนทำงานเสร็จ
+    await notifyAdminSlipReview(inserted.data.id).catch((notifyError) => {
+      console.error("slip review notification failed", notifyError);
     });
 
     return {
@@ -357,9 +355,15 @@ export async function uploadSlipImage(input: UploadSlipInput) {
 
   const autoReview = await runAutoReview();
 
+  if (!autoReview.shouldVerify) {
+    await notifyAdminSlipReview(inserted.data.id).catch((notifyError) => {
+      console.error("slip review notification failed", notifyError);
+    });
+  }
+
   return {
     id: inserted.data.id,
-    status: autoReview.status,
+    status: autoReview.shouldVerify ? "verified" : "manual_review",
     autoCheckStatus: autoReview.autoCheckStatus,
     autoCheckReasons: autoReview.autoCheckReasons
   } satisfies UploadSlipResult;

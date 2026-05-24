@@ -531,6 +531,12 @@ tbody tr:hover {
   background: rgba(249, 250, 255, 0.92);
 }
 
+.btn.ok {
+  background: rgba(240, 255, 250, 0.94);
+  border-color: rgba(7, 147, 111, 0.22);
+  color: var(--ok);
+}
+
 .btn.selected {
   background: linear-gradient(135deg, rgba(115, 103, 255, 0.14), rgba(76, 199, 247, 0.14));
   border-color: rgba(109, 99, 255, 0.34);
@@ -851,9 +857,20 @@ tbody tr:hover {
 }
 
 .slipActions {
-  display: grid;
+  align-items: center;
+  display: flex;
   gap: 8px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.slipActions .slipDownloadBtn {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 6px 10px;
+}
+
+.slipActions .btn.ok,
+.slipActions .btn.danger {
+  flex: 1;
 }
 
 .slipHistory {
@@ -936,6 +953,33 @@ tbody tr:hover {
 
 .slipGallery .emptyState {
   grid-column: 1 / -1;
+}
+
+.manageSection {
+  border: 1px solid rgba(216, 72, 104, 0.15);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  padding: 0;
+}
+
+.manageSection > summary {
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  user-select: none;
+}
+
+.manageSection[open] > summary {
+  border-bottom: 1px solid rgba(216, 72, 104, 0.12);
+}
+
+.manageActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
 }
 
 /* ═══════════════════════════════════════════════════════════════════

@@ -16,6 +16,8 @@ type LiffApi = {
   getAccessToken: () => string | null;
   getProfile: () => Promise<LiffProfile>;
   closeWindow: () => void;
+  /** ส่ง message ในนามผู้ใช้ไปยังแชทปัจจุบัน — ใช้ trigger bot reply (ฟรี) */
+  sendMessages: (messages: Array<Record<string, unknown>>) => Promise<void>;
 };
 
 type LiffMode = "pay" | "slip" | "me";
@@ -636,6 +638,15 @@ export default function LiffPaymentPage() {
   );
 }
 
+function closeWithStatusCard() {
+  // ส่ง text trigger ให้ bot reply ด้วยการ์ดสถานะ (ฟรี — ไม่ใช้ push)
+  // แล้วปิด LIFF window
+  void window.liff
+    ?.sendMessages([{ type: "text", text: "ดูสถานะสลิปล่าสุด" }])
+    .catch(() => null)
+    .finally(() => window.liff?.closeWindow());
+}
+
 function PaymentAndSlipCard(props: {
   result: SelectionResult;
   slipFile: File | null;
@@ -697,19 +708,31 @@ function PaymentAndSlipCard(props: {
               </div>
             </div>
           ) : null}
-          <button
-            className="btn primary liffPrimary"
-            disabled={!props.slipFile || props.uploadState.phase === "uploading" || props.busy}
-            onClick={props.onUpload}
-          >
-            {props.uploadState.phase === "uploading"
-              ? "กำลังอัปโหลด..."
-              : props.uploadState.phase === "done"
-                ? "อัปโหลดเสร็จแล้ว"
-                : "อัปโหลดสลิป"}
-          </button>
+          {props.uploadState.phase === "done" ? (
+            // หลังส่งสลิปสำเร็จ — ปุ่มนี้ส่ง trigger ให้บอทตอบด้วยการ์ดสถานะแล้วปิด LIFF
+            <button
+              className="btn primary liffPrimary"
+              onClick={closeWithStatusCard}
+            >
+              ✅ รับทราบ — ดูสถานะในแชท
+            </button>
+          ) : (
+            <button
+              className="btn primary liffPrimary"
+              disabled={!props.slipFile || props.uploadState.phase === "uploading" || props.busy}
+              onClick={props.onUpload}
+            >
+              {props.uploadState.phase === "uploading" ? "กำลังอัปโหลด..." : "อัปโหลดสลิป"}
+            </button>
+          )}
         </>
       )}
+      {(isPendingReview || isVerified) ? (
+        // สำหรับกรณีที่เปิด LIFF มาแล้วสลิปอยู่ในสถานะรอตรวจหรือผ่านแล้ว
+        <button className="btn primary liffPrimary" onClick={closeWithStatusCard}>
+          {isVerified ? "✅ ดูสถานะในแชท" : "📋 ดูสถานะในแชท"}
+        </button>
+      ) : null}
       <button className="btn subtle liffPrimary" onClick={props.onChangeName}>
         เปลี่ยนงาน/รายชื่อ
       </button>
