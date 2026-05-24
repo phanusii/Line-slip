@@ -344,6 +344,10 @@ export default function LiffPaymentPage() {
   async function uploadSlip() {
     if (!slipFile || !result?.target.id) return;
     await uploadSlipForTarget(result.target.id, slipFile);
+    // After upload, mark as pending review so upload section hides automatically
+    setResult((prev) =>
+      prev ? { ...prev, target: { ...prev.target, status: "manual_review" } } : null
+    );
   }
 
   if (!liffId) {
@@ -578,25 +582,38 @@ function PaymentAndSlipCard(props: {
 
       <p className="muted">สแกน QR แล้วถ่ายรูปสลิป อัปโหลดด้านล่างนี้</p>
 
-      <label className="uploadButton liffUpload">
-        {slipFile ? `📎 ${slipFile.name}` : "เลือกรูปสลิป"}
-        <input
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          onChange={(e) => onFile(e.target.files?.[0] ?? null)}
-        />
-      </label>
+      {result.target.status === "manual_review" ? (
+        <div style={{ textAlign: "center", padding: "12px 0 4px" }}>
+          <span className="badge warn" style={{ fontSize: 13, padding: "6px 14px" }}>
+            ✓ รับสลิปแล้ว — รอตรวจสอบ
+          </span>
+          <p className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+            ผู้ดูแลจะตรวจสอบและยืนยันการชำระเงินของคุณเร็วๆ นี้
+          </p>
+        </div>
+      ) : (
+        <>
+          <label className="uploadButton liffUpload">
+            {slipFile ? `📎 ${slipFile.name}` : "เลือกรูปสลิป"}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
 
-      <button
-        className="btn primary liffPrimary"
-        disabled={!slipFile || busy}
-        onClick={onUpload}
-        style={{ marginTop: 2 }}
-      >
-        {busy ? (
-          <><span className="liffSpinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> กำลังอัปโหลด</>
-        ) : "อัปโหลดสลิป"}
-      </button>
+          <button
+            className="btn primary liffPrimary"
+            disabled={!slipFile || busy}
+            onClick={onUpload}
+            style={{ marginTop: 2 }}
+          >
+            {busy ? (
+              <><span className="liffSpinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> กำลังอัปโหลด</>
+            ) : "อัปโหลดสลิป"}
+          </button>
+        </>
+      )}
 
       <button className="btn subtle liffPrimary" onClick={onChangeName}>
         เปลี่ยนงาน / รายชื่อ
@@ -627,7 +644,7 @@ function StatusView(props: {
         <div className="paymentStatusList">
           {visiblePayments.map((payment) => {
             const latestSlip = payment.slips[0];
-            const canUpload = payment.status !== "verified";
+            const canUpload = payment.status !== "verified" && payment.status !== "manual_review";
             return (
               <article
                 className="paymentStatusCard"
