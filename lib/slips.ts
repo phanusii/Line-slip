@@ -20,8 +20,8 @@ type UploadSlipInput = {
 };
 
 export type UploadSlipResult = {
-  id: string;
-  status: "manual_review" | "duplicate_slip" | "verified";
+  id?: string;
+  status: "manual_review" | "duplicate_blocked" | "verified";
   autoCheckStatus?: string | null;
   autoCheckReasons?: string[];
   duplicateOfId?: string;
@@ -42,6 +42,97 @@ export function hashImage(buffer: Buffer) {
 function isMissingColumnError(error: unknown, column: string) {
   const message = error instanceof Error ? error.message : JSON.stringify(error);
   return message.includes(column) && message.includes("schema cache");
+}
+
+function isDuplicateSlipConstraintError(error: unknown) {
+  const supabaseError = error as { code?: string; message?: string; details?: string };
+  const text = `${supabaseError.message ?? ""} ${supabaseError.details ?? ""}`;
+  return (
+    supabaseError.code === "23505" &&
+    text.includes("slip_submissions") &&
+    (text.includes("slip_ref") || text.includes("image_hash"))
+  );
+}
+
+async function auditDuplicateSlipAttempt(
+  supabase: ReturnType<typeof createServiceClient>,
+  input: UploadSlipInput,
+  duplicate: { id: string; event_id?: string | null; payment_target_id?: string | null },
+  reason: "duplicate_slip_qr" | "duplicate_image_hash",
+  details: { imageHash: string; slipRef: string | null }
+) {
+  const audit = await supabase.from("audit_logs").insert({
+    actor_email: "system-duplicate-blocker",
+    actor_role: "viewer",
+    action: "duplicate_slip_blocked",
+    entity_type: "slip_submission",
+    entity_id: duplicate.id,
+    event_id: input.eventId,
+    after_data: {
+      duplicate_of_id: duplicate.id,
+      duplicate_by: reason === "duplicate_slip_qr" ? "slip_ref" : "image_hash",
+      duplicate_event_id: duplicate.event_id ?? null,
+      duplicate_payment_target_id: duplicate.payment_target_id ?? null,
+      attempted_payment_target_id: input.paymentTargetId ?? null,
+      line_user_id: input.lineUserDbId ?? null,
+      line_message_id: input.lineMessageId ?? null,
+      image_hash: details.imageHash,
+      slip_ref: details.slipRef
+    },
+    reason: "Blocked duplicate slip before storage upload and database insert"
+  });
+
+  if (audit.error) {
+    console.error("duplicate slip audit failed", audit.error);
+  }
+}
+
+async function findDuplicateSlip(
+  supabase: ReturnType<typeof createServiceClient>,
+  imageHash: string,
+  slipRef: string | null
+) {
+  if (slipRef) {
+    const qrDuplicate = await supabase
+      .from("slip_submissions")
+      .select("id,event_id,payment_target_id")
+      .eq("slip_ref", slipRef)
+      .is("metadata_deleted_at", null)
+      .limit(1)
+      .maybeSingle();
+
+    if (qrDuplicate.error) {
+      throw qrDuplicate.error;
+    }
+
+    if (qrDuplicate.data) {
+      return {
+        duplicate: qrDuplicate.data,
+        reason: "duplicate_slip_qr" as const
+      };
+    }
+  }
+
+  const imageDuplicate = await supabase
+    .from("slip_submissions")
+    .select("id,event_id,payment_target_id")
+    .eq("image_hash", imageHash)
+    .is("metadata_deleted_at", null)
+    .limit(1)
+    .maybeSingle();
+
+  if (imageDuplicate.error) {
+    throw imageDuplicate.error;
+  }
+
+  if (imageDuplicate.data) {
+    return {
+      duplicate: imageDuplicate.data,
+      reason: "duplicate_image_hash" as const
+    };
+  }
+
+  return null;
 }
 
 export async function readSlipQrRef(buffer: Buffer) {
@@ -81,102 +172,17 @@ export async function uploadSlipImage(input: UploadSlipInput) {
   const targetSegment = input.paymentTargetId ?? "no-target";
   const amount = Number(input.amountExpected ?? 0).toFixed(2);
 
-  const imageDuplicate = await supabase
-    .from("slip_submissions")
-    .select("id,event_id,payment_target_id")
-    .eq("image_hash", imageHash)
-    .is("metadata_deleted_at", null)
-    .limit(1)
-    .maybeSingle();
-
-  if (imageDuplicate.error) {
-    throw imageDuplicate.error;
-  }
-
-  const qrDuplicate = slipRef
-    ? await supabase
-        .from("slip_submissions")
-        .select("id,event_id,payment_target_id")
-        .eq("slip_ref", slipRef)
-        .is("metadata_deleted_at", null)
-        .limit(1)
-        .maybeSingle()
-    : { data: null, error: null };
-
-  if (qrDuplicate.error) {
-    throw qrDuplicate.error;
-  }
-
-  const duplicate = qrDuplicate.data ?? imageDuplicate.data;
+  const duplicate = await findDuplicateSlip(supabase, imageHash, slipRef);
   if (duplicate) {
-    const duplicatePath = `events/${input.eventId}/duplicate_slip/${targetSegment}_${amount}_${datePart}_${imageHash.slice(0, 12)}.jpg`;
-    const uploadedDuplicate = await supabase.storage
-      .from(STORAGE_BUCKET)
-      .upload(duplicatePath, normalized, {
-        contentType: "image/jpeg",
-        upsert: false
-      });
-
-    if (uploadedDuplicate.error) {
-      throw uploadedDuplicate.error;
-    }
-
-    const duplicatePayload = {
-      event_id: input.eventId,
-      payment_target_id: input.paymentTargetId ?? null,
-      line_user_id: input.lineUserDbId ?? null,
-      line_message_id: input.lineMessageId ?? null,
-      storage_bucket: STORAGE_BUCKET,
-      storage_path: duplicatePath,
-      original_filename: `${input.personName ?? "unknown"}_${amount}_duplicate.jpg`,
-      file_size: normalized.byteLength,
-      mime_type: "image/jpeg",
-      image_hash: imageHash,
-      slip_ref: null,
-      duplicate_of_slip_id: duplicate.id,
-      amount_expected: input.amountExpected ?? null,
-      status: "duplicate_slip",
-      auto_check_status: "duplicate_slip",
-      auto_check_reasons: [
-        qrDuplicate.data ? "duplicate_slip_qr" : "duplicate_image_hash"
-      ],
-      auto_checked_at: now.toISOString(),
-      rejection_reason: `duplicate ${qrDuplicate.data ? "slip_ref" : "image_hash"} of slip ${duplicate.id}`
-    };
-    let duplicateInsert = await supabase
-      .from("slip_submissions")
-      .insert(duplicatePayload)
-      .select("id,status")
-      .single();
-
-    if (duplicateInsert.error && isMissingColumnError(duplicateInsert.error, "duplicate_of_slip_id")) {
-      const { duplicate_of_slip_id: _duplicateOfSlipId, ...fallbackPayload } = duplicatePayload;
-      duplicateInsert = await supabase
-        .from("slip_submissions")
-        .insert(fallbackPayload)
-        .select("id,status")
-        .single();
-    }
-
-    if (duplicateInsert.error) {
-      await supabase.storage.from(STORAGE_BUCKET).remove([duplicatePath]);
-      throw duplicateInsert.error;
-    }
-
-    if (input.paymentTargetId) {
-      await supabase
-        .from("payment_targets")
-        .update({ status: "duplicate_slip" })
-        .eq("id", input.paymentTargetId)
-        .neq("status", "verified");
-    }
-
+    await auditDuplicateSlipAttempt(supabase, input, duplicate.duplicate, duplicate.reason, {
+      imageHash,
+      slipRef
+    });
     return {
-      id: duplicateInsert.data.id,
-      status: "duplicate_slip",
-      autoCheckStatus: "duplicate_slip",
-      autoCheckReasons: [qrDuplicate.data ? "duplicate_slip_qr" : "duplicate_image_hash"],
-      duplicateOfId: duplicate.id
+      status: "duplicate_blocked",
+      autoCheckStatus: "duplicate_blocked",
+      autoCheckReasons: [duplicate.reason],
+      duplicateOfId: duplicate.duplicate.id
     } satisfies UploadSlipResult;
   }
 
@@ -218,6 +224,24 @@ export async function uploadSlipImage(input: UploadSlipInput) {
 
   if (inserted.error) {
     await supabase.storage.from(STORAGE_BUCKET).remove([path]);
+    if (isDuplicateSlipConstraintError(inserted.error)) {
+      const concurrentDuplicate = await findDuplicateSlip(supabase, imageHash, slipRef);
+      if (concurrentDuplicate) {
+        await auditDuplicateSlipAttempt(
+          supabase,
+          input,
+          concurrentDuplicate.duplicate,
+          concurrentDuplicate.reason,
+          { imageHash, slipRef }
+        );
+        return {
+          status: "duplicate_blocked",
+          autoCheckStatus: "duplicate_blocked",
+          autoCheckReasons: [concurrentDuplicate.reason],
+          duplicateOfId: concurrentDuplicate.duplicate.id
+        } satisfies UploadSlipResult;
+      }
+    }
     throw inserted.error;
   }
 

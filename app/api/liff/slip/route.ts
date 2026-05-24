@@ -100,8 +100,8 @@ export async function POST(request: NextRequest) {
       ok: true,
       slip,
       message:
-        slip.status === "duplicate_slip"
-          ? "สลิปนี้เคยถูกส่งแล้ว ระบบบันทึกไว้เป็นสลิปซ้ำ ไม่ใช้ยืนยันการจ่าย"
+        slip.status === "duplicate_blocked"
+          ? "สลิปนี้เคยส่งแล้ว ระบบไม่บันทึกซ้ำ"
           : slip.status === "verified"
             ? "ตรวจสลิปผ่านอัตโนมัติจากรูปสลิปแล้ว โปรดทราบว่านี่ไม่ใช่การยืนยันจากธนาคาร"
           : "รับสลิปใหม่แล้ว ระบบจะใช้ใบล่าสุดให้แอดมินตรวจ"

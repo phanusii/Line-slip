@@ -176,9 +176,9 @@ export async function POST(request: NextRequest) {
       });
 
       if (event.replyToken) {
-        if (slip.status === "duplicate_slip") {
+        if (slip.status === "duplicate_blocked") {
           await replyLine(event.replyToken, [
-            { type: "text", text: "❌ สลิปนี้เคยถูกส่งแล้ว ระบบบันทึกไว้เป็นสลิปซ้ำ ไม่ใช้ยืนยันการจ่ายค่ะ" }
+            { type: "text", text: "❌ สลิปนี้เคยส่งแล้ว ระบบไม่บันทึกซ้ำค่ะ" }
           ]);
         } else if (slip.status === "verified") {
           await replyLine(event.replyToken, [

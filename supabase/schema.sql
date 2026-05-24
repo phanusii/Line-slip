@@ -118,6 +118,7 @@ create index payment_targets_event_status_idx on public.payment_targets(event_id
 create index slip_submissions_event_status_idx on public.slip_submissions(event_id, status);
 create index slip_submissions_storage_path_idx on public.slip_submissions(storage_path) where storage_path is not null;
 create index slip_submissions_image_hash_idx on public.slip_submissions(image_hash) where image_hash is not null and metadata_deleted_at is null;
+create unique index slip_submissions_image_hash_active_unique_idx on public.slip_submissions(image_hash) where image_hash is not null and metadata_deleted_at is null and status <> 'duplicate_slip'::public.payment_status;
 create unique index slip_submissions_slip_ref_unique_idx on public.slip_submissions(slip_ref) where slip_ref is not null and metadata_deleted_at is null;
 create index slip_submissions_auto_check_status_idx on public.slip_submissions(event_id, auto_check_status) where metadata_deleted_at is null;
 create index slip_submissions_payment_target_created_idx on public.slip_submissions(payment_target_id, created_at desc) where metadata_deleted_at is null;
