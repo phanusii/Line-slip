@@ -334,6 +334,8 @@ export default function LiffPaymentPage() {
   const [booting, setBooting] = useState(true);
   const [targetsLoading, setTargetsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const modeRequestRef = useRef(0);
+  const targetRequestRef = useRef(0);
 
   useEffect(() => {
     if (!slipFile) return;
@@ -426,15 +428,19 @@ export default function LiffPaymentPage() {
 
   async function loadMode(nextMode: LiffMode, token = accessToken) {
     if (!token) return;
+    const requestId = ++modeRequestRef.current;
     setError(null);
     setNotice(null);
     const cachedBootstrap = readBootstrapCache(nextMode);
-    if (cachedBootstrap) applyBootstrap(cachedBootstrap);
+    if (cachedBootstrap && modeRequestRef.current === requestId) {
+      applyBootstrap(cachedBootstrap);
+    }
 
     const data = await jsonFetch<BootstrapResponse>("/api/liff/bootstrap", {
       method: "POST",
       body: JSON.stringify({ accessToken: token, page: nextMode })
     });
+    if (modeRequestRef.current !== requestId) return;
     writeBootstrapCache(nextMode, data);
     applyBootstrap(data);
 
@@ -445,8 +451,9 @@ export default function LiffPaymentPage() {
 
   async function loadTargets(eventId: string, token = accessToken) {
     if (!eventId || !token) return;
+    const requestId = ++targetRequestRef.current;
     const cachedTargets = readTargetsCache(eventId);
-    if (cachedTargets) {
+    if (cachedTargets && targetRequestRef.current === requestId) {
       setEvents((current) =>
         current.map((event) => (event.id === eventId ? { ...event, targets: cachedTargets } : event))
       );
@@ -458,12 +465,15 @@ export default function LiffPaymentPage() {
         `/api/liff/targets?eventId=${encodeURIComponent(eventId)}`,
         withLineAccessToken(token)
       );
+      if (targetRequestRef.current !== requestId) return;
       writeTargetsCache(eventId, data.targets);
       setEvents((current) =>
         current.map((event) => (event.id === eventId ? { ...event, targets: data.targets } : event))
       );
     } finally {
-      setTargetsLoading(false);
+      if (targetRequestRef.current === requestId) {
+        setTargetsLoading(false);
+      }
     }
   }
 
