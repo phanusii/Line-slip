@@ -114,6 +114,7 @@ type EventDetail = {
       available?: boolean;
       confidence?: number | null;
       amountMatched?: boolean | null;
+      minConfidence?: number;
       amounts?: number[];
       selectedAmount?: number | null;
       text?: string;
@@ -150,6 +151,7 @@ const autoReasonLabels: Record<string, string> = {
   target_status_verified: "รายชื่อนี้จ่ายแล้ว",
   target_status_deleted: "รายชื่อนี้ถูกลบแล้ว",
   target_not_selected_in_liff: "ยังไม่ได้เลือกชื่อผ่าน LIFF",
+  missing_line_user: "ไม่พบ LINE user ของผู้ส่ง",
   line_user_mismatch: "LINE user ไม่ตรงกับผู้เลือกชื่อ",
   selection_window_expired: "เกินเวลาหลังสร้าง QR",
   amount_not_unique_in_event: "ยอดไม่ unique ในงานนี้",
@@ -262,6 +264,7 @@ export default function Home() {
   const [autoVerifyWindowHours, setAutoVerifyWindowHours] = useState("24");
   const [autoVerifyRequiresUniqueAmount, setAutoVerifyRequiresUniqueAmount] = useState(true);
   const [autoVerifyOcrEnabled, setAutoVerifyOcrEnabled] = useState(false);
+  const [autoVerifyOcrMinConfidence, setAutoVerifyOcrMinConfidence] = useState("45");
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramChatId, setTelegramChatId] = useState("");
   const [telegramConnect, setTelegramConnect] = useState<TelegramConnect | null>(null);
@@ -353,6 +356,7 @@ export default function Home() {
       setAutoVerifyWindowHours(settings.auto_verify_window_hours ?? "24");
       setAutoVerifyRequiresUniqueAmount(settingEnabled(settings.auto_verify_requires_unique_amount, true));
       setAutoVerifyOcrEnabled(settingEnabled(settings.auto_verify_ocr_enabled, false));
+      setAutoVerifyOcrMinConfidence(settings.auto_verify_ocr_min_confidence ?? "45");
       setTelegramBotToken(settings.telegram_bot_token ?? "");
       setTelegramChatId(settings.telegram_chat_id ?? "");
       setDiscordWebhookUrl(settings.discord_webhook_url ?? "");
@@ -379,6 +383,7 @@ export default function Home() {
           auto_verify_window_hours: autoVerifyWindowHours,
           auto_verify_requires_unique_amount: String(autoVerifyRequiresUniqueAmount),
           auto_verify_ocr_enabled: String(autoVerifyOcrEnabled),
+          auto_verify_ocr_min_confidence: autoVerifyOcrMinConfidence,
           telegram_bot_token: telegramBotToken,
           telegram_chat_id: telegramChatId,
           discord_webhook_url: discordWebhookUrl,
@@ -1254,7 +1259,9 @@ export default function Home() {
                           <span className={slip.status === "verified" ? "badge ok" : "badge"}>
                             {slip.replaced_by_slip_id
                               ? "ถูกแทนที่"
-                              : statusLabels[slip.status] ?? slip.status}
+                              : slip.status === "verified" && slip.auto_check_status === "passed"
+                                ? "ผ่านอัตโนมัติ"
+                                : statusLabels[slip.status] ?? slip.status}
                           </span>
                         </div>
                         <div className="slipFacts">
@@ -1355,8 +1362,8 @@ export default function Home() {
                 ใช้ OCR อ่านยอดทศนิยม 2 ตำแหน่งร่วมกับ QR บนสลิป, hash กันซ้ำ และเวลาเลือก QR วิธีนี้ไม่ใช่การยืนยันจากธนาคาร
               </p>
             </div>
-            <span className={autoVerifyFromSlipEnabled ? "badge warn" : "badge"}>
-              {autoVerifyFromSlipEnabled ? "เปิดใช้งานแบบรับความเสี่ยง" : "ปิดอยู่"}
+            <span className={autoVerifyFromSlipEnabled ? "badge ok" : "badge"}>
+              {autoVerifyFromSlipEnabled ? "เปิดโหมดเข้มสุด" : "ปิดอยู่"}
             </span>
           </div>
 
@@ -1399,6 +1406,15 @@ export default function Home() {
                 value={autoVerifyWindowHours}
                 onChange={(e) => setAutoVerifyWindowHours(e.target.value)}
                 placeholder="24"
+              />
+            </label>
+            <label className="field">
+              <span>OCR confidence ขั้นต่ำ</span>
+              <input
+                inputMode="numeric"
+                value={autoVerifyOcrMinConfidence}
+                onChange={(e) => setAutoVerifyOcrMinConfidence(e.target.value)}
+                placeholder="45"
               />
             </label>
           </div>

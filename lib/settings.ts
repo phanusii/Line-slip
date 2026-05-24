@@ -13,7 +13,8 @@ export const SETTING_KEYS = [
   "auto_verify_from_slip_enabled",
   "auto_verify_window_hours",
   "auto_verify_requires_unique_amount",
-  "auto_verify_ocr_enabled"
+  "auto_verify_ocr_enabled",
+  "auto_verify_ocr_min_confidence"
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];

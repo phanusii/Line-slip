@@ -13,5 +13,6 @@ values
   ('auto_verify_from_slip_enabled', 'false'),
   ('auto_verify_window_hours', '24'),
   ('auto_verify_requires_unique_amount', 'true'),
-  ('auto_verify_ocr_enabled', 'false')
+  ('auto_verify_ocr_enabled', 'false'),
+  ('auto_verify_ocr_min_confidence', '45')
 on conflict (key) do nothing;

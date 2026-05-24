@@ -15,6 +15,7 @@ type OcrResult = {
   enabled: boolean;
   available: boolean;
   confidence: number | null;
+  minConfidence?: number;
   amountMatched: boolean | null;
   amounts?: number[];
   selectedAmount?: number | null;
@@ -44,7 +45,11 @@ function clippedText(text: string) {
   return text.replace(/\s+/g, " ").trim().slice(0, 700);
 }
 
-async function runFreeOcr(buffer: Buffer, expectedAmount?: number | null): Promise<OcrResult> {
+async function runFreeOcr(
+  buffer: Buffer,
+  expectedAmount?: number | null,
+  minConfidence = 45
+): Promise<OcrResult> {
   try {
     const tesseract = await import("tesseract.js");
     const result = await tesseract.recognize(buffer, "eng");
@@ -55,19 +60,21 @@ async function runFreeOcr(buffer: Buffer, expectedAmount?: number | null): Promi
       typeof expectedAmount === "number" && Number.isFinite(expectedAmount)
         ? toSatang(expectedAmount)
         : null;
-    const selectedAmount =
+    const matchedAmount =
       expectedSatang === null
         ? null
         : amounts.find((amount) => toSatang(amount) === expectedSatang) ?? null;
+    const selectedAmount = matchedAmount ?? amounts[0] ?? null;
     const amountMatched =
       expectedSatang !== null
-        ? selectedAmount !== null
+        ? matchedAmount !== null
         : null;
 
     return {
       enabled: true,
       available: true,
       confidence,
+      minConfidence,
       amountMatched,
       amounts,
       selectedAmount,
@@ -78,6 +85,7 @@ async function runFreeOcr(buffer: Buffer, expectedAmount?: number | null): Promi
       enabled: true,
       available: false,
       confidence: null,
+      minConfidence,
       amountMatched: null,
       amounts: [],
       selectedAmount: null,
@@ -92,12 +100,14 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
     "auto_verify_from_slip_enabled",
     "auto_verify_window_hours",
     "auto_verify_requires_unique_amount",
-    "auto_verify_ocr_enabled"
+    "auto_verify_ocr_enabled",
+    "auto_verify_ocr_min_confidence"
   ]);
   const enabled = getBooleanSetting(settings, "auto_verify_from_slip_enabled", false);
   const windowHours = getNumberSetting(settings, "auto_verify_window_hours", 24);
   const requiresUniqueAmount = getBooleanSetting(settings, "auto_verify_requires_unique_amount", true);
   const ocrEnabled = getBooleanSetting(settings, "auto_verify_ocr_enabled", false);
+  const ocrMinConfidence = getNumberSetting(settings, "auto_verify_ocr_min_confidence", 45);
 
   const reasons: string[] = [];
   let ocrResult: OcrResult | undefined;
@@ -112,6 +122,7 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
 
   if (!input.paymentTargetId) reasons.push("missing_payment_target");
   if (!input.slipRef) reasons.push("missing_slip_qr");
+  if (!input.lineUserDbId) reasons.push("missing_line_user");
 
   if (!input.paymentTargetId) {
     return { shouldVerify: false, status: "manual_review", reasons };
@@ -162,10 +173,10 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
   if (!ocrEnabled) {
     reasons.push("ocr_disabled");
   } else {
-    ocrResult = await runFreeOcr(input.normalizedBuffer, input.amountExpected);
+    ocrResult = await runFreeOcr(input.normalizedBuffer, input.amountExpected, ocrMinConfidence);
     if (!ocrResult.available) {
       reasons.push("ocr_unavailable");
-    } else if ((ocrResult.confidence ?? 0) < 45) {
+    } else if ((ocrResult.confidence ?? 0) < ocrMinConfidence) {
       reasons.push("ocr_low_confidence");
     } else if (!ocrResult.amounts?.length) {
       reasons.push("ocr_amount_missing");
