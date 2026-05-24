@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import jsQR from "jsqr";
-import { after } from "next/server";
 import sharp from "sharp";
 import { notifyAdminSlipReview } from "@/lib/admin-review";
 import { STORAGE_BUCKET } from "@/lib/env";
@@ -19,7 +18,6 @@ type UploadSlipInput = {
   mimeType?: string | null;
   lineMessageId?: string | null;
   lineUserDbId?: string | null;
-  deferAutoReview?: boolean;
 };
 
 export type UploadSlipResult = {
@@ -267,8 +265,8 @@ export async function uploadSlipImage(input: UploadSlipInput) {
     }
   }
 
-  // runAutoReview ทำแค่ OCR + auto-verify — ไม่รับผิดชอบส่งแจ้งเตือน
-  // (notification ถูกย้ายออกมาเรียก synchronous เพื่อความน่าเชื่อถือ)
+  // Run OCR + QR auto review before returning so Vercel cannot drop the work
+  // before auto_check_status/reasons are persisted.
   async function runAutoReview() {
     const autoCheck = await evaluateFreeAutoSlipCheck({
       slipId: inserted.data.id,
@@ -327,30 +325,6 @@ export async function uploadSlipImage(input: UploadSlipInput) {
       })
       .eq("id", input.paymentTargetId)
       .neq("status", "verified");
-  }
-
-  if (input.deferAutoReview) {
-    // OCR + auto-verify ทำใน background (อาจช้า — tesseract, DB queries)
-    after(async () => {
-      try {
-        await runAutoReview();
-      } catch (error) {
-        console.error("deferred slip auto review failed", error);
-      }
-    });
-
-    // แจ้งเตือน admin แบบ synchronous ก่อนส่ง response กลับ
-    // — ไม่ผ่าน after() เพราะบน Vercel Hobby/Pro อาจถูก kill ก่อนทำงานเสร็จ
-    await notifyAdminSlipReview(inserted.data.id).catch((notifyError) => {
-      console.error("slip review notification failed", notifyError);
-    });
-
-    return {
-      id: inserted.data.id,
-      status: "manual_review",
-      autoCheckStatus: "queued",
-      autoCheckReasons: ["auto_review_queued"]
-    } satisfies UploadSlipResult;
   }
 
   const autoReview = await runAutoReview();

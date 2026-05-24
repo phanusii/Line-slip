@@ -261,8 +261,7 @@ export async function POST(request: NextRequest) {
         sourceBuffer: content.buffer,
         mimeType: content.mimeType,
         lineMessageId: event.message.id,
-        lineUserDbId: user?.data?.id ?? null,
-        deferAutoReview: true
+        lineUserDbId: user?.data?.id ?? null
       });
 
       if (event.replyToken) {

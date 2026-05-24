@@ -93,8 +93,7 @@ export async function POST(request: NextRequest) {
       amountExpected: Number(target.amount_due),
       sourceBuffer: buffer,
       mimeType: file.type,
-      lineUserDbId: lineUser.id,
-      deferAutoReview: true
+      lineUserDbId: lineUser.id
     });
 
     return NextResponse.json({
