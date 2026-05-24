@@ -70,8 +70,17 @@ type SlipUploadResponse = {
   slip?: {
     id?: string;
     status: string;
+    autoCheckStatus?: string | null;
   };
   alreadyVerified?: boolean;
+};
+
+type SlipReviewResponse = {
+  review: {
+    status: "verified" | "manual_review";
+    autoCheckStatus: string;
+    autoCheckReasons: string[];
+  };
 };
 
 const eventsCacheKey = "line-slip:liff-events:v1";
@@ -415,12 +424,20 @@ export default function LiffPaymentPage() {
       const message = data.message ?? "อัปโหลดสลิปเสร็จแล้ว รอผู้ดูแลตรวจสอบ";
       setUploadState({ phase: "done", message });
       setNotice(message);
+      const nextStatus = data.alreadyVerified
+        ? "verified"
+        : data.slip?.status === "verified"
+          ? "verified"
+          : "manual_review";
       setResult((current) =>
         current?.target.id === targetId
-          ? { ...current, target: { ...current.target, status: data.alreadyVerified ? "verified" : "manual_review" } }
+          ? { ...current, target: { ...current.target, status: nextStatus } }
           : current
       );
       if (mode === "me") await loadMode("me");
+      if (data.slip?.id && data.slip.status === "manual_review") {
+        void reviewSlipAfterUpload(data.slip.id, targetId);
+      }
       return data;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -433,6 +450,42 @@ export default function LiffPaymentPage() {
           ? { phase: "idle" }
           : current
       );
+    }
+  }
+
+  async function reviewSlipAfterUpload(slipId: string, targetId: string) {
+    if (!accessToken) return;
+    setNotice("อัปโหลดสลิปเสร็จแล้ว กำลังตรวจยอดอัตโนมัติ...");
+    try {
+      const data = await jsonFetch<SlipReviewResponse>("/api/liff/slip/review", {
+        method: "POST",
+        body: JSON.stringify({ accessToken, slipId })
+      });
+      const verified = data.review.status === "verified";
+      setNotice(
+        verified
+          ? "ตรวจสลิปผ่านอัตโนมัติแล้ว"
+          : "รับสลิปแล้ว รอผู้ดูแลตรวจสอบ"
+      );
+      setUploadState((current) =>
+        current.phase === "done"
+          ? {
+              phase: "done",
+              message: verified
+                ? "ตรวจสลิปผ่านอัตโนมัติแล้ว"
+                : "อัปโหลดสลิปเสร็จแล้ว รอผู้ดูแลตรวจสอบ"
+            }
+          : current
+      );
+      setResult((current) =>
+        current?.target.id === targetId
+          ? { ...current, target: { ...current.target, status: verified ? "verified" : "manual_review" } }
+          : current
+      );
+      if (mode === "me") await loadMode("me");
+    } catch (err) {
+      setNotice("อัปโหลดสลิปแล้ว แต่ตรวจอัตโนมัติยังไม่สำเร็จ ผู้ดูแลจะตรวจต่อจาก Dashboard");
+      console.error("LIFF slip auto review failed", err);
     }
   }
 
