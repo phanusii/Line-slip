@@ -150,12 +150,23 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    if (
-      event.message?.type === "text" &&
-      ["สถานะ", "ดูสถานะ", "ดูสถานะการชำระเงิน", "ดูสถานะสลิปล่าสุด", "check status"].includes(
-        (event.message.text ?? "").trim().toLowerCase()
-      )
-    ) {
+    if (event.message?.type === "text") {
+      const text = (event.message.text ?? "").trim().toLowerCase();
+      const isStatusRequest =
+        text.includes("สถานะ") ||
+        text === "check status" ||
+        text === "status";
+
+      if (!isStatusRequest) {
+        if (event.replyToken) {
+          await replyLine(
+            event.replyToken,
+            lineMenuMessages("กรุณากดสร้าง QR ก่อนโอนเงิน หรือกดดูสถานะเพื่อตรวจข้อมูลของฉัน")
+          );
+        }
+        continue;
+      }
+
       if (event.replyToken) {
         await replyUserStatus(supabase, event.replyToken, event.source?.userId);
       }
