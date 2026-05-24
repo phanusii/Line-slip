@@ -26,18 +26,47 @@ async function lineRequest(path: string, init?: RequestInit) {
   return { ok: response.ok, status: response.status, body };
 }
 
+async function webhookDiagnostics() {
+  const expectedEndpoint = `${appBaseUrl()}/api/line/webhook`;
+  const endpoint = await lineRequest("/v2/bot/channel/webhook/endpoint");
+  const test = await lineRequest("/v2/bot/channel/webhook/test", { method: "POST" });
+  const endpointBody = endpoint.body as { endpoint?: string; active?: boolean } | null;
+
+  return {
+    expectedEndpoint,
+    endpoint,
+    test,
+    endpointMatches: endpointBody?.endpoint === expectedEndpoint,
+    webhookActive: endpointBody?.active === true,
+    manualEnableRequired: endpointBody?.active !== true,
+    manualEnablePath:
+      "LINE Developers Console > Messaging API channel > Messaging API tab > Webhook settings > Use webhook: Enabled",
+    checkedAt: new Date().toISOString()
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     assertAdmin(request);
+    return NextResponse.json(await webhookDiagnostics());
+  } catch (error) {
+    if (error instanceof Response) return error;
+    return NextResponse.json({ error: formatApiError(error) }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    assertAdmin(request);
     const expectedEndpoint = `${appBaseUrl()}/api/line/webhook`;
-    const endpoint = await lineRequest("/v2/bot/channel/webhook/endpoint");
-    const test = await lineRequest("/v2/bot/channel/webhook/test", { method: "POST" });
+    const configure = await lineRequest("/v2/bot/channel/webhook/endpoint", {
+      method: "PUT",
+      body: JSON.stringify({ endpoint: expectedEndpoint })
+    });
 
     return NextResponse.json({
-      expectedEndpoint,
-      endpoint,
-      test,
-      checkedAt: new Date().toISOString()
+      configure,
+      ...(await webhookDiagnostics())
     });
   } catch (error) {
     if (error instanceof Response) return error;
