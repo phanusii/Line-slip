@@ -1146,6 +1146,89 @@ tbody tr:hover {
   width: 100%;
 }
 
+/* Target preview panel ใน create event modal */
+.targetPreviewPanel {
+  background: rgba(248, 250, 255, 0.95);
+  border: 1.5px solid rgba(99, 102, 241, 0.15);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.targetPreviewHeader {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.targetPreviewError {
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 8px;
+  color: #dc2626;
+  font-size: 12px;
+  margin: 0;
+  padding: 6px 10px;
+}
+
+.targetPreviewList {
+  display: grid;
+  gap: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.targetPreviewRow {
+  align-items: center;
+  border-radius: 6px;
+  display: grid;
+  font-size: 13px;
+  gap: 8px;
+  grid-template-columns: 24px 1fr auto;
+  padding: 4px 6px;
+}
+
+.targetPreviewRow:hover {
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.targetPreviewRow.hasError {
+  background: rgba(239, 68, 68, 0.06);
+  color: #dc2626;
+}
+
+.targetPreviewOrder {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.targetPreviewName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.targetPreviewAmount {
+  color: var(--fg);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.targetPreviewAmount.fromDefault {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.targetPreviewMore {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 6px;
+  text-align: center;
+}
+
 .confirmPanel {
   background: rgba(99, 102, 241, 0.06);
   border: 1.5px solid rgba(99, 102, 241, 0.2);

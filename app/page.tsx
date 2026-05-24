@@ -301,6 +301,44 @@ export default function Home() {
     [events, selectedEventId]
   );
 
+  // parse preview รายชื่อแบบ client-side (mirror server-side parseTargetsText)
+  const parsedNewTargets = useMemo(() => {
+    const text = newTargetsText.trim();
+    const defaultAmt = Number(newDefaultAmount.replace(/,/g, "").trim());
+    if (!text) return [];
+    return text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const cells = line.includes("\t")
+          ? line.split("\t")
+          : line.includes(",")
+            ? line.split(",")
+            : line.split(/\s{2,}/);
+        const cleaned = cells.map((c) => c.trim()).filter(Boolean);
+        const lineAmountMatch = line.match(/^(.+?)\s+([0-9][0-9,]*(?:\.\d+)?)$/);
+        const maybeAmount =
+          cleaned.length > 1
+            ? Number(cleaned[cleaned.length - 1].replace(/,/g, ""))
+            : lineAmountMatch
+              ? Number(lineAmountMatch[2].replace(/,/g, ""))
+              : Number.NaN;
+        const hasAmount = Number.isFinite(maybeAmount) && maybeAmount > 0;
+        const display_name = hasAmount
+          ? cleaned.length > 1
+            ? cleaned.slice(0, -1).join(" ")
+            : lineAmountMatch?.[1].trim() ?? line
+          : line;
+        const amount_due = hasAmount ? maybeAmount : Number.isFinite(defaultAmt) && defaultAmt > 0 ? defaultAmt : 0;
+        return { display_name: display_name.trim(), amount_due, from_default: !hasAmount };
+      })
+      .filter((t) => {
+        const n = t.display_name.toLowerCase();
+        return t.display_name && n !== "ชื่อ" && n !== "name" && n !== "รายชื่อ";
+      });
+  }, [newTargetsText, newDefaultAmount]);
+
   async function checkSession() {
     setAuthChecking(true);
     try {
@@ -1785,18 +1823,57 @@ export default function Home() {
             <label className="field">
               <span>รายชื่อและยอดเงิน</span>
               <textarea
-                rows={8}
+                rows={6}
                 value={newTargetsText}
                 onChange={(event) => setNewTargetsText(event.target.value)}
                 placeholder={"สมชาย\nสมหญิง\nมานะ"}
               />
             </label>
 
+            {parsedNewTargets.length > 0 ? (() => {
+              const duplicates = parsedNewTargets
+                .map((t) => t.display_name)
+                .filter((name, i, arr) => arr.indexOf(name) !== i);
+              const missingAmount = parsedNewTargets.filter((t) => t.amount_due <= 0);
+              const total = parsedNewTargets.reduce((sum, t) => sum + t.amount_due, 0);
+              const hasError = duplicates.length > 0 || missingAmount.length > 0;
+              return (
+                <div className="targetPreviewPanel">
+                  <div className="targetPreviewHeader">
+                    <span>
+                      <strong>ตัวอย่างรายชื่อ</strong>
+                      <span className="muted"> · {parsedNewTargets.length} คน · รวม {total.toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })} บาท</span>
+                    </span>
+                    {hasError && <span className="badge danger">มีข้อผิดพลาด</span>}
+                  </div>
+                  {duplicates.length > 0 && (
+                    <p className="targetPreviewError">⚠ ชื่อซ้ำ: {[...new Set(duplicates)].join(", ")}</p>
+                  )}
+                  {missingAmount.length > 0 && (
+                    <p className="targetPreviewError">⚠ ยังไม่มียอด: {missingAmount.map((t) => t.display_name).join(", ")} — กรอกยอดกลางด้านบน</p>
+                  )}
+                  <div className="targetPreviewList">
+                    {parsedNewTargets.slice(0, 50).map((t, i) => (
+                      <div key={i} className={`targetPreviewRow${t.amount_due <= 0 ? " hasError" : ""}`}>
+                        <span className="targetPreviewOrder">{i + 1}</span>
+                        <span className="targetPreviewName">{t.display_name}</span>
+                        <span className={`targetPreviewAmount${t.from_default ? " fromDefault" : ""}`}>
+                          {t.amount_due > 0 ? `${t.amount_due.toLocaleString("th-TH")} บ.` : "—"}
+                        </span>
+                      </div>
+                    ))}
+                    {parsedNewTargets.length > 50 && (
+                      <div className="targetPreviewMore">+ อีก {parsedNewTargets.length - 50} รายชื่อ</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })() : null}
+
             <div className="hintBox">
               <strong>รูปแบบที่รองรับ</strong>
               <p>
-                แนะนำวางเฉพาะรายชื่อทีละบรรทัดและกรอกยอดกลาง เช่น 500 เพื่อให้ระบบสร้างยอด 500.01-500.35
-                ส่วนรูปแบบเดิม สมชาย 500 หรือ สมชาย[TAB]500 ยังใช้ได้
+                วางเฉพาะชื่อทีละบรรทัดแล้วกรอกยอดกลาง หรือ สมชาย 500 / สมชาย[TAB]500
               </p>
             </div>
 
