@@ -1,3 +1,7 @@
+// Edge runtime: ~0 ms cold start vs ~300–800 ms for Node Lambda.
+// This route only uses fetch + Supabase JS (no native binaries).
+export const runtime = "edge";
+
 import { NextRequest, NextResponse } from "next/server";
 import { formatApiError } from "@/lib/api-error";
 import { requireLineAccessToken } from "@/lib/liff";

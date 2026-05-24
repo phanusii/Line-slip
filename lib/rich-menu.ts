@@ -1,3 +1,25 @@
+import { SARABUN_BOLD_B64, SARABUN_REGULAR_B64 } from "@/lib/fonts";
+
+// ── Font registration ────────────────────────────────────────────────────────
+// Register Sarabun (Regular + Bold) into @napi-rs/canvas once per process.
+// This avoids librsvg / fontconfig issues on Vercel where no system Thai
+// fonts exist.  @napi-rs/canvas has its own bundled text engine.
+let _fontsReady = false;
+async function ensureFonts() {
+  if (_fontsReady) return;
+  const { GlobalFonts } = await import("@napi-rs/canvas");
+  GlobalFonts.register(
+    Buffer.from(SARABUN_REGULAR_B64, "base64"),
+    "Sarabun"
+  );
+  GlobalFonts.register(
+    Buffer.from(SARABUN_BOLD_B64, "base64"),
+    "Sarabun"
+  );
+  _fontsReady = true;
+}
+
+// ── LINE API types ───────────────────────────────────────────────────────────
 export type RichMenuAction =
   | { type: "uri"; label?: string; uri: string }
   | { type: "message"; label?: string; text: string }
@@ -24,6 +46,7 @@ type CreateRichMenuPayload = {
   areas: RichMenuArea[];
 };
 
+// ── LINE API helpers ─────────────────────────────────────────────────────────
 async function lineFetch(
   path: string,
   init: RequestInit = {},
@@ -91,227 +114,284 @@ export async function listRichMenus(): Promise<{ richmenus: Array<{ richMenuId: 
   return response.json() as Promise<{ richmenus: Array<{ richMenuId: string }> }>;
 }
 
-// Generates a 2500x270 compact Rich Menu image.
-// Design: "Vivid Panels" — 3 full-bleed colour panels (Coral / Sky-Teal / Violet-Indigo)
-// clipped to a rounded rectangle. Each panel: SVG icon + bold title + subtitle text.
-export async function generateCompactMenuImage(): Promise<Buffer> {
-  const sharp = (await import("sharp")).default;
+// ── Image generators ─────────────────────────────────────────────────────────
 
-  const W   = 2500;
-  const H   = 270;
+/**
+ * Generates a 2500×270 compact Rich Menu image.
+ * Three full-bleed colour panels (Coral / Sky-Teal / Violet-Indigo),
+ * each with an icon and Thai label text.
+ */
+export async function generateCompactMenuImage(): Promise<Buffer> {
+  await ensureFonts();
+  const { createCanvas } = await import("@napi-rs/canvas");
+
+  const W = 2500, H = 270;
   const COL = Math.floor(W / 3); // 833
 
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext("2d");
+
+  // ── Round-rect clip ────────────────────────────────────────────────────────
+  ctx.beginPath();
+  ctx.roundRect(0, 0, W, H, 32);
+  ctx.clip();
+
+  // ── Panel backgrounds ──────────────────────────────────────────────────────
+  const panelDefs: [string, string, number, number][] = [
+    ["#ff6b6b", "#c0134f", 0,        COL],
+    ["#38bdf8", "#0e7490", COL,      COL],
+    ["#c084fc", "#4338ca", COL * 2,  W - COL * 2]
+  ];
+  for (const [top, bot, px, pw] of panelDefs) {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, top);
+    g.addColorStop(1, bot);
+    ctx.fillStyle = g;
+    ctx.fillRect(px, 0, pw, H);
+  }
+
+  // ── Top sheen ──────────────────────────────────────────────────────────────
+  const sheen = ctx.createLinearGradient(0, 0, 0, H);
+  sheen.addColorStop(0, "rgba(255,255,255,0.14)");
+  sheen.addColorStop(0.45, "rgba(255,255,255,0)");
+  ctx.fillStyle = sheen;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Panel dividers ─────────────────────────────────────────────────────────
+  ctx.fillStyle = "rgba(255,255,255,0.2)";
+  ctx.fillRect(COL - 1,     0, 2, H);
+  ctx.fillRect(COL * 2 - 1, 0, 2, H);
+
+  // ── Icon layout constants ──────────────────────────────────────────────────
   const cx1 = Math.round(COL / 2);            // 417
   const cx2 = Math.round(COL + COL / 2);      // 1250
   const cx3 = Math.round(COL * 2 + COL / 2);  // 2083
+  const ICY = 62, ICR = 36;
+  const TITLE_Y = 158, SUB_Y = 220;
 
-  // Vertical rhythm: icon centre → title → subtitle
-  // Font sizes must be large enough to remain legible when the
-  // 2500×270 image is scaled down to ~42 logical-px height on phone.
-  const ICY    = 62;   // icon circle centre-y (smaller → more room for text)
-  const ICR    = 36;   // icon circle radius
-  const TITLE_Y = 158; // bold label baseline  (font 84 px → ~13 px on screen)
-  const SUB_Y   = 220; // subtitle baseline    (font 58 px → ~9 px on screen)
+  const drawHalo = (cx: number) => {
+    ctx.beginPath();
+    ctx.arc(cx, ICY, ICR, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.45)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  };
 
-  const F = "Arial,Helvetica,sans-serif";
+  // ── Icon 1: ฿ (Baht) ───────────────────────────────────────────────────────
+  drawHalo(cx1);
+  ctx.font = "900 44px Sarabun";
+  ctx.fillStyle = "white";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("฿", cx1, ICY);
 
-  // ── Thai text as Unicode escapes (librsvg-safe) ──────────────────────────
-  // Titles
-  const T_TRANSFER = "&#x0E42;&#x0E2D;&#x0E19;&#x0E40;&#x0E07;&#x0E34;&#x0E19;"; // โอนเงิน
-  const T_STATUS   = "&#x0E2A;&#x0E16;&#x0E32;&#x0E19;&#x0E30;";                  // สถานะ
-  const T_CONTACT  = "&#x0E15;&#x0E34;&#x0E14;&#x0E15;&#x0E48;&#x0E2D;";          // ติดต่อ
-  // Subtitles
-  // "เลือกงาน / รับ QR Code"
-  const S_TRANSFER = "&#x0E40;&#x0E25;&#x0E37;&#x0E2D;&#x0E01;&#x0E07;&#x0E32;&#x0E19; / &#x0E23;&#x0E31;&#x0E1A; QR Code";
-  // "ตรวจสอบการชำระเงิน"
-  const S_STATUS   = "&#x0E15;&#x0E23;&#x0E27;&#x0E08;&#x0E2A;&#x0E2D;&#x0E1A;&#x0E01;&#x0E32;&#x0E23;&#x0E0A;&#x0E33;&#x0E23;&#x0E30;&#x0E40;&#x0E07;&#x0E34;&#x0E19;";
-  // "สอบถามทีมงาน"
-  const S_CONTACT  = "&#x0E2A;&#x0E2D;&#x0E1A;&#x0E16;&#x0E32;&#x0E21;&#x0E17;&#x0E35;&#x0E21;&#x0E07;&#x0E32;&#x0E19;";
+  // ── Icon 2: bar chart ──────────────────────────────────────────────────────
+  drawHalo(cx2);
+  ctx.fillStyle = "white";
+  for (const [bx, by, bh] of [
+    [cx2 - 27, ICY - 8,  22],
+    [cx2 - 7,  ICY - 20, 34],
+    [cx2 + 13, ICY - 32, 46]
+  ] as [number, number, number][]) {
+    ctx.beginPath();
+    ctx.roundRect(bx, by, 14, bh, 3);
+    ctx.fill();
+  }
 
-  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <clipPath id="card"><rect width="${W}" height="${H}" rx="32"/></clipPath>
+  // ── Icon 3: speech bubble ──────────────────────────────────────────────────
+  drawHalo(cx3);
+  ctx.fillStyle = "white";
+  ctx.beginPath();
+  ctx.roundRect(cx3 - 26, ICY - 16, 52, 32, 8);
+  ctx.fill();
+  // Tail
+  ctx.beginPath();
+  ctx.moveTo(cx3 - 10, ICY + 16);
+  ctx.lineTo(cx3 - 20, ICY + 30);
+  ctx.lineTo(cx3 + 4,  ICY + 16);
+  ctx.closePath();
+  ctx.fill();
+  // Dots
+  for (const dotX of [cx3 - 10, cx3, cx3 + 10]) {
+    ctx.beginPath();
+    ctx.arc(dotX, ICY, 4, 0, Math.PI * 2);
+    ctx.fillStyle = "#6d28d9";
+    ctx.fill();
+  }
 
-    <!-- Panel 1: Coral → Crimson -->
-    <linearGradient id="g1" x1="0" y1="0" x2="0" y2="${H}" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#ff6b6b"/>
-      <stop offset="100%" stop-color="#c0134f"/>
-    </linearGradient>
-    <!-- Panel 2: Sky → Teal -->
-    <linearGradient id="g2" x1="0" y1="0" x2="0" y2="${H}" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#38bdf8"/>
-      <stop offset="100%" stop-color="#0e7490"/>
-    </linearGradient>
-    <!-- Panel 3: Violet → Indigo -->
-    <linearGradient id="g3" x1="0" y1="0" x2="0" y2="${H}" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#c084fc"/>
-      <stop offset="100%" stop-color="#4338ca"/>
-    </linearGradient>
-    <!-- Shared top-sheen -->
-    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="${H}" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"  stop-color="white" stop-opacity="0.14"/>
-      <stop offset="45%" stop-color="white" stop-opacity="0"/>
-    </linearGradient>
-  </defs>
+  // ── Titles ─────────────────────────────────────────────────────────────────
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "white";
+  ctx.font = "bold 84px Sarabun";
+  ctx.fillText("โอนเงิน", cx1, TITLE_Y);
+  ctx.fillText("สถานะ",   cx2, TITLE_Y);
+  ctx.fillText("ติดต่อ",  cx3, TITLE_Y);
 
-  <g clip-path="url(#card)">
+  // ── Subtitles ──────────────────────────────────────────────────────────────
+  ctx.font = "58px Sarabun";
+  ctx.globalAlpha = 0.9;
+  ctx.fillText("เลือกงาน / รับ QR Code",   cx1, SUB_Y);
+  ctx.fillText("ตรวจสอบการชำระเงิน", cx2, SUB_Y);
+  ctx.fillText("สอบถามทีมงาน",         cx3, SUB_Y);
+  ctx.globalAlpha = 1;
 
-    <!-- ── Three full-bleed colour panels ── -->
-    <rect x="0"          y="0" width="${COL}"       height="${H}" fill="url(#g1)"/>
-    <rect x="${COL}"     y="0" width="${COL}"       height="${H}" fill="url(#g2)"/>
-    <rect x="${COL * 2}" y="0" width="${W - COL*2}" height="${H}" fill="url(#g3)"/>
-    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#sheen)"/>
-
-    <!-- ── Panel dividers ── -->
-    <rect x="${COL - 1}"     y="0" width="2" height="${H}" fill="white" opacity="0.2"/>
-    <rect x="${COL * 2 - 1}" y="0" width="2" height="${H}" fill="white" opacity="0.2"/>
-
-    <!-- ══════════════════════════════════════════
-         ICON 1 — โอนเงิน  (฿ in halo)
-         ══════════════════════════════════════════ -->
-    <circle cx="${cx1}" cy="${ICY}" r="${ICR}" fill="white" opacity="0.18"/>
-    <circle cx="${cx1}" cy="${ICY}" r="${ICR}" fill="none" stroke="white" stroke-width="2" opacity="0.45"/>
-    <text x="${cx1}" y="${ICY + 14}" text-anchor="middle"
-          font-size="44" font-weight="900" fill="white" font-family="${F}">&#x0E3F;</text>
-
-    <!-- ══════════════════════════════════════════
-         ICON 2 — สถานะ  (3-bar chart)
-         ══════════════════════════════════════════ -->
-    <circle cx="${cx2}" cy="${ICY}" r="${ICR}" fill="white" opacity="0.18"/>
-    <circle cx="${cx2}" cy="${ICY}" r="${ICR}" fill="none" stroke="white" stroke-width="2" opacity="0.45"/>
-    <!-- bars bottom-aligned at ICY+14, heights 22/34/46 -->
-    <rect x="${cx2 - 27}" y="${ICY - 8}"  width="14" height="22" rx="3" fill="white"/>
-    <rect x="${cx2 - 7}"  y="${ICY - 20}" width="14" height="34" rx="3" fill="white"/>
-    <rect x="${cx2 + 13}" y="${ICY - 32}" width="14" height="46" rx="3" fill="white"/>
-
-    <!-- ══════════════════════════════════════════
-         ICON 3 — ติดต่อ  (speech bubble)
-         ══════════════════════════════════════════ -->
-    <circle cx="${cx3}" cy="${ICY}" r="${ICR}" fill="white" opacity="0.18"/>
-    <circle cx="${cx3}" cy="${ICY}" r="${ICR}" fill="none" stroke="white" stroke-width="2" opacity="0.45"/>
-    <!-- bubble fits inside circle (cy=62, r=36 → y: 26–98) -->
-    <rect x="${cx3 - 26}" y="${ICY - 16}" width="52" height="32" rx="8" fill="white"/>
-    <path d="M${cx3 - 10},${ICY + 16} L${cx3 - 20},${ICY + 30} L${cx3 + 4},${ICY + 16} Z" fill="white"/>
-    <circle cx="${cx3 - 10}" cy="${ICY}"      r="4" fill="#6d28d9"/>
-    <circle cx="${cx3}"       cy="${ICY}"      r="4" fill="#6d28d9"/>
-    <circle cx="${cx3 + 10}"  cy="${ICY}"      r="4" fill="#6d28d9"/>
-
-    <!-- ── Main titles ── -->
-    <text x="${cx1}" y="${TITLE_Y}" text-anchor="middle" font-size="84" font-weight="bold" fill="white" font-family="${F}">${T_TRANSFER}</text>
-    <text x="${cx2}" y="${TITLE_Y}" text-anchor="middle" font-size="84" font-weight="bold" fill="white" font-family="${F}">${T_STATUS}</text>
-    <text x="${cx3}" y="${TITLE_Y}" text-anchor="middle" font-size="84" font-weight="bold" fill="white" font-family="${F}">${T_CONTACT}</text>
-
-    <!-- ── Subtitles ── -->
-    <text x="${cx1}" y="${SUB_Y}" text-anchor="middle" font-size="58" fill="white" opacity="0.9" font-family="${F}">${S_TRANSFER}</text>
-    <text x="${cx2}" y="${SUB_Y}" text-anchor="middle" font-size="58" fill="white" opacity="0.9" font-family="${F}">${S_STATUS}</text>
-    <text x="${cx3}" y="${SUB_Y}" text-anchor="middle" font-size="58" fill="white" opacity="0.9" font-family="${F}">${S_CONTACT}</text>
-
-  </g>
-</svg>`;
-
-  return sharp(Buffer.from(svg)).png().toBuffer();
+  return canvas.encodeSync("png");
 }
 
+/**
+ * Generates a 2500×1686 four-button Rich Menu image.
+ * 2×2 grid of frosted-glass cards on a pastel rainbow background,
+ * each with a badge circle, Thai title and subtitle.
+ */
 export async function generateFourButtonMenuImage(): Promise<Buffer> {
-  const sharp = (await import("sharp")).default;
-  const W = 2500;
-  const H = 1686;
-  const COL = Math.floor(W / 2);
-  const ROW = Math.floor(H / 2);
-  const F = "Arial,Helvetica,sans-serif";
+  await ensureFonts();
+  const { createCanvas } = await import("@napi-rs/canvas");
 
+  const W = 2500, H = 1686;
+  const COL = Math.floor(W / 2); // 1250
+  const ROW = Math.floor(H / 2); // 843
+  const cardW = COL - 124;
+  const cardH = ROW - 122;
+
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext("2d");
+
+  // ── Rainbow background ─────────────────────────────────────────────────────
+  const rainbow = ctx.createLinearGradient(0, 0, W, H);
+  rainbow.addColorStop(0,    "#ffe4e6");
+  rainbow.addColorStop(0.18, "#fed7aa");
+  rainbow.addColorStop(0.36, "#fef3c7");
+  rainbow.addColorStop(0.54, "#bbf7d0");
+  rainbow.addColorStop(0.72, "#bae6fd");
+  rainbow.addColorStop(0.88, "#ddd6fe");
+  rainbow.addColorStop(1,    "#fbcfe8");
+  ctx.fillStyle = rainbow;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Glow overlays ──────────────────────────────────────────────────────────
+  const R = Math.max(W, H);
+  const glowA = ctx.createRadialGradient(W * 0.18, H * 0.18, 0, W * 0.18, H * 0.18, R * 0.52);
+  glowA.addColorStop(0, "rgba(255,255,255,0.9)");
+  glowA.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = glowA;
+  ctx.fillRect(0, 0, W, H);
+
+  const glowB = ctx.createRadialGradient(W * 0.88, H * 0.78, 0, W * 0.88, H * 0.78, R * 0.58);
+  glowB.addColorStop(0, "rgba(255,255,255,0.65)");
+  glowB.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = glowB;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Decorative wave strokes ────────────────────────────────────────────────
+  ctx.lineCap = "round";
+
+  ctx.strokeStyle = "rgba(255,255,255,0.34)";
+  ctx.lineWidth = 86;
+  ctx.beginPath();
+  ctx.moveTo(-120, 500);
+  ctx.bezierCurveTo(260, 240,  540, 240,  900, 500);
+  ctx.bezierCurveTo(1260, 760, 1530, 750, 1980, 440);
+  ctx.bezierCurveTo(2430, 130, 2500, 190, 2680, 390);
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.26)";
+  ctx.lineWidth = 62;
+  ctx.beginPath();
+  ctx.moveTo(-160, 1120);
+  ctx.bezierCurveTo(260, 910,  520, 980,  860, 1180);
+  ctx.bezierCurveTo(1200, 1380, 1510, 1470, 1940, 1110);
+  ctx.bezierCurveTo(2370, 750,  2380, 830,  2680, 1040);
+  ctx.stroke();
+
+  // ── Cards ──────────────────────────────────────────────────────────────────
   const items = [
-    {
-      x: 76,
-      y: 74,
-      title: "สร้าง QR Code",
-      sub: "เลือกงานและชื่อเพื่อจ่ายเงิน",
-      badge: "QR",
-      accent: "#7dd3fc",
-      text: "#1f3b63"
-    },
-    {
-      x: COL + 48,
-      y: 74,
-      title: "ส่งสลิป",
-      sub: "อัปโหลดหลักฐานการโอน",
-      badge: "UP",
-      accent: "#86efac",
-      text: "#14532d"
-    },
-    {
-      x: 76,
-      y: ROW + 48,
-      title: "สถานะ",
-      sub: "ดูผลชำระเงินล่าสุด",
-      badge: "OK",
-      accent: "#c4b5fd",
-      text: "#3b2779"
-    },
-    {
-      x: COL + 48,
-      y: ROW + 48,
-      title: "ติดต่อ",
-      sub: "สอบถามผู้ดูแลระบบ",
-      badge: "Hi",
-      accent: "#f9a8d4",
-      text: "#831843"
-    }
+    { x: 76,        y: 74,        title: "สร้าง QR Code", sub: "เลือกงานและชื่อเพื่อจ่ายเงิน", badge: "QR", accent: "#7dd3fc", color: "#1f3b63" },
+    { x: COL + 48,  y: 74,        title: "ส่งสลิป",        sub: "อัปโหลดหลักฐานการโอน",         badge: "UP", accent: "#86efac", color: "#14532d" },
+    { x: 76,        y: ROW + 48,  title: "สถานะ",           sub: "ดูผลชำระเงินล่าสุด",            badge: "OK", accent: "#c4b5fd", color: "#3b2779" },
+    { x: COL + 48,  y: ROW + 48,  title: "ติดต่อ",          sub: "สอบถามผู้ดูแลระบบ",             badge: "Hi", accent: "#f9a8d4", color: "#831843" }
   ];
 
-  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="rainbow" x1="0" y1="0" x2="${W}" y2="${H}" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#ffe4e6"/>
-      <stop offset="18%" stop-color="#fed7aa"/>
-      <stop offset="36%" stop-color="#fef3c7"/>
-      <stop offset="54%" stop-color="#bbf7d0"/>
-      <stop offset="72%" stop-color="#bae6fd"/>
-      <stop offset="88%" stop-color="#ddd6fe"/>
-      <stop offset="100%" stop-color="#fbcfe8"/>
-    </linearGradient>
-    <radialGradient id="glowA" cx="18%" cy="18%" r="52%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity=".9"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="glowB" cx="88%" cy="78%" r="58%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity=".65"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="softShadow" x="-15%" y="-15%" width="130%" height="130%">
-      <feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#64748b" flood-opacity=".20"/>
-    </filter>
-  </defs>
-  <rect width="${W}" height="${H}" fill="url(#rainbow)"/>
-  <rect width="${W}" height="${H}" fill="url(#glowA)"/>
-  <rect width="${W}" height="${H}" fill="url(#glowB)"/>
+  for (const item of items) {
+    const { x, y, title, sub, badge, accent, color } = item;
 
-  <path d="M-120 500 C260 240 540 240 900 500 S1530 750 1980 440 S2500 190 2680 390"
-        fill="none" stroke="#ffffff" stroke-width="86" stroke-linecap="round" opacity=".34"/>
-  <path d="M-160 1120 C260 910 520 980 860 1180 S1510 1470 1940 1110 S2380 830 2680 1040"
-        fill="none" stroke="#ffffff" stroke-width="62" stroke-linecap="round" opacity=".26"/>
+    // Card with drop-shadow
+    ctx.save();
+    ctx.shadowColor   = "rgba(100,116,139,0.20)";
+    ctx.shadowBlur    = 44;
+    ctx.shadowOffsetY = 24;
+    ctx.fillStyle     = "rgba(255,255,255,0.76)";
+    ctx.beginPath();
+    ctx.roundRect(x, y, cardW, cardH, 64);
+    ctx.fill();
+    ctx.restore();
 
-  ${items.map((item) => `
-    <g filter="url(#softShadow)">
-      <rect x="${item.x}" y="${item.y}" width="${COL - 124}" height="${ROW - 122}" rx="64"
-            fill="#ffffff" fill-opacity=".76" stroke="#ffffff" stroke-width="5"/>
-    </g>
-    <rect x="${item.x + 34}" y="${item.y + 34}" width="${COL - 192}" height="14" rx="7" fill="${item.accent}"/>
-    <circle cx="${item.x + 174}" cy="${item.y + 252}" r="116" fill="${item.accent}" opacity=".86"/>
-    <circle cx="${item.x + 174}" cy="${item.y + 252}" r="82" fill="#ffffff" opacity=".42"/>
-    <text x="${item.x + 174}" y="${item.y + 278}" text-anchor="middle"
-          font-family="${F}" font-size="74" font-weight="900" fill="${item.text}">${item.badge}</text>
-    <text x="${item.x + 336}" y="${item.y + 244}" font-family="${F}" font-size="86"
-          font-weight="900" fill="${item.text}">${item.title}</text>
-    <text x="${item.x + 340}" y="${item.y + 338}" font-family="${F}" font-size="46"
-          font-weight="700" fill="#64748b">${item.sub}</text>
-    <path d="M${item.x + COL - 260} ${item.y + ROW - 238} h110 a44 44 0 0 1 0 88 h-110 a44 44 0 0 1 0-88"
-          fill="${item.accent}" opacity=".52"/>
-  `).join("")}
+    // Card stroke
+    ctx.strokeStyle = "white";
+    ctx.lineWidth   = 5;
+    ctx.beginPath();
+    ctx.roundRect(x, y, cardW, cardH, 64);
+    ctx.stroke();
 
-  <rect x="${COL - 2}" y="72" width="4" height="${H - 144}" rx="2" fill="#ffffff" opacity=".55"/>
-  <rect x="72" y="${ROW - 2}" width="${W - 144}" height="4" rx="2" fill="#ffffff" opacity=".55"/>
-</svg>`;
+    // Accent bar at top of card
+    ctx.fillStyle = accent;
+    ctx.beginPath();
+    ctx.roundRect(x + 34, y + 34, cardW - 68, 14, 7);
+    ctx.fill();
 
-  return sharp(Buffer.from(svg)).png().toBuffer();
+    // Badge outer circle (86 % opacity)
+    const bcx = x + 174, bcy = y + 252;
+    ctx.globalAlpha = 0.86;
+    ctx.fillStyle   = accent;
+    ctx.beginPath();
+    ctx.arc(bcx, bcy, 116, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Badge inner circle (42 % white)
+    ctx.fillStyle = "rgba(255,255,255,0.42)";
+    ctx.beginPath();
+    ctx.arc(bcx, bcy, 82, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Badge label (ASCII, renders without Thai font issues)
+    ctx.font         = "900 74px Sarabun";
+    ctx.fillStyle    = color;
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(badge, bcx, bcy);
+
+    // Card title (Thai)
+    ctx.font         = "900 86px Sarabun";
+    ctx.fillStyle    = color;
+    ctx.textAlign    = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(title, x + 336, y + 244);
+
+    // Card subtitle (Thai)
+    ctx.font      = "bold 46px Sarabun";
+    ctx.fillStyle = "#64748b";
+    ctx.fillText(sub, x + 340, y + 338);
+
+    // Pill button (bottom of card)
+    ctx.globalAlpha = 0.52;
+    ctx.fillStyle   = accent;
+    ctx.beginPath();
+    ctx.roundRect(x + COL - 260, y + ROW - 238, 198, 88, 44);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // ── Grid dividers ──────────────────────────────────────────────────────────
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.beginPath();
+  ctx.roundRect(COL - 2, 72, 4, H - 144, 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.roundRect(72, ROW - 2, W - 144, 4, 2);
+  ctx.fill();
+
+  return canvas.encodeSync("png");
 }

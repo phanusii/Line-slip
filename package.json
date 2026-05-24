@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.0",
     "@supabase/supabase-js": "^2.75.0",
     "archiver": "^7.0.1",
     "clsx": "^2.1.1",
