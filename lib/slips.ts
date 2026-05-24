@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import jsQR from "jsqr";
+import { after } from "next/server";
 import sharp from "sharp";
 import { notifyAdminSlipReview } from "@/lib/admin-review";
 import { STORAGE_BUCKET } from "@/lib/env";
@@ -17,6 +18,7 @@ type UploadSlipInput = {
   mimeType?: string | null;
   lineMessageId?: string | null;
   lineUserDbId?: string | null;
+  deferAutoReview?: boolean;
 };
 
 export type UploadSlipResult = {
@@ -262,49 +264,58 @@ export async function uploadSlipImage(input: UploadSlipInput) {
     }
   }
 
-  const autoCheck = await evaluateFreeAutoSlipCheck({
-    slipId: inserted.data.id,
-    eventId: input.eventId,
-    paymentTargetId: input.paymentTargetId ?? null,
-    lineUserDbId: input.lineUserDbId ?? null,
-    slipRef,
-    normalizedBuffer: normalized,
-    amountExpected: input.amountExpected ?? null
-  });
-
-  const autoCheckUpdated = await supabase
-    .from("slip_submissions")
-    .update({
-      amount_detected: autoCheck.amountDetected ?? null,
-      auto_check_status: autoCheck.status,
-      auto_check_reasons: autoCheck.reasons,
-      auto_checked_at: new Date().toISOString(),
-      ocr_result: autoCheck.ocrResult ?? null
-    })
-    .eq("id", inserted.data.id);
-
-  if (autoCheckUpdated.error) throw autoCheckUpdated.error;
-
-  if (autoCheck.shouldVerify) {
-    await applySlipStatus({
+  async function runAutoReview() {
+    const autoCheck = await evaluateFreeAutoSlipCheck({
       slipId: inserted.data.id,
-      status: "verified",
-      reason:
-        "ตรวจผ่านอัตโนมัติจากรูปสลิป: QR ไม่ซ้ำ รูปไม่ซ้ำ ยอดเฉพาะรายชื่อ และอยู่ในช่วงเวลาที่กำหนด ไม่ใช่การยืนยันจากธนาคาร",
-      actor: {
-        actor_email: "system-free-auto-review",
-        actor_role: "viewer"
-      },
-      auditAction: "auto_verify_from_slip",
-      source: "free_auto_review"
+      eventId: input.eventId,
+      paymentTargetId: input.paymentTargetId ?? null,
+      lineUserDbId: input.lineUserDbId ?? null,
+      slipRef,
+      normalizedBuffer: normalized,
+      amountExpected: input.amountExpected ?? null
     });
 
+    const autoCheckUpdated = await supabase
+      .from("slip_submissions")
+      .update({
+        amount_detected: autoCheck.amountDetected ?? null,
+        auto_check_status: autoCheck.status,
+        auto_check_reasons: autoCheck.reasons,
+        auto_checked_at: new Date().toISOString(),
+        ocr_result: autoCheck.ocrResult ?? null
+      })
+      .eq("id", inserted.data.id);
+
+    if (autoCheckUpdated.error) throw autoCheckUpdated.error;
+
+    if (autoCheck.shouldVerify) {
+      await applySlipStatus({
+        slipId: inserted.data.id,
+        status: "verified",
+        reason:
+          "ตรวจผ่านอัตโนมัติจากรูปสลิป: QR ไม่ซ้ำ รูปไม่ซ้ำ ยอดเฉพาะรายชื่อ และอยู่ในช่วงเวลาที่กำหนด ไม่ใช่การยืนยันจากธนาคาร",
+        actor: {
+          actor_email: "system-free-auto-review",
+          actor_role: "viewer"
+        },
+        auditAction: "auto_verify_from_slip",
+        source: "free_auto_review"
+      });
+
+      return {
+        status: "verified" as const,
+        autoCheckStatus: autoCheck.status,
+        autoCheckReasons: autoCheck.reasons
+      };
+    }
+
+    await notifyAdminSlipReview(inserted.data.id);
+
     return {
-      id: inserted.data.id,
-      status: "verified",
+      status: "manual_review" as const,
       autoCheckStatus: autoCheck.status,
       autoCheckReasons: autoCheck.reasons
-    } satisfies UploadSlipResult;
+    };
   }
 
   if (input.paymentTargetId) {
@@ -319,13 +330,33 @@ export async function uploadSlipImage(input: UploadSlipInput) {
       .neq("status", "verified");
   }
 
-  await notifyAdminSlipReview(inserted.data.id);
+  if (input.deferAutoReview) {
+    after(async () => {
+      try {
+        await runAutoReview();
+      } catch (error) {
+        console.error("deferred slip auto review failed", error);
+        await notifyAdminSlipReview(inserted.data.id).catch((notifyError) => {
+          console.error("fallback slip review notification failed", notifyError);
+        });
+      }
+    });
+
+    return {
+      id: inserted.data.id,
+      status: "manual_review",
+      autoCheckStatus: "queued",
+      autoCheckReasons: ["auto_review_queued"]
+    } satisfies UploadSlipResult;
+  }
+
+  const autoReview = await runAutoReview();
 
   return {
     id: inserted.data.id,
-    status: "manual_review",
-    autoCheckStatus: autoCheck.status,
-    autoCheckReasons: autoCheck.reasons
+    status: autoReview.status,
+    autoCheckStatus: autoReview.autoCheckStatus,
+    autoCheckReasons: autoReview.autoCheckReasons
   } satisfies UploadSlipResult;
 }
 

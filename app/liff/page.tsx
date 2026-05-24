@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatMoney } from "@/lib/format";
 
 type LiffProfile = {
@@ -19,6 +19,12 @@ type LiffApi = {
 };
 
 type LiffMode = "pay" | "slip" | "me";
+type UploadPhase = "idle" | "ready" | "uploading" | "done" | "error";
+
+type UploadState = {
+  phase: UploadPhase;
+  message?: string;
+};
 
 type EventRow = {
   id: string;
@@ -56,6 +62,22 @@ type MyPayment = {
     file_deleted_at: string | null;
   }>;
 };
+
+type SlipUploadResponse = {
+  message?: string;
+  error?: string;
+  slip?: {
+    id?: string;
+    status: string;
+  };
+  alreadyVerified?: boolean;
+};
+
+const eventsCacheKey = "line-slip:liff-events:v1";
+
+function targetsCacheKey(eventId: string) {
+  return `line-slip:liff-targets:${eventId}:v1`;
+}
 
 const statusText: Record<string, string> = {
   unpaid: "ยังไม่จ่าย",
@@ -120,6 +142,54 @@ function modeFromUrl(): LiffMode {
   return "pay";
 }
 
+function readEventsCache() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(eventsCacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { savedAt: number; events: EventRow[] };
+    if (!parsed.savedAt || Date.now() - parsed.savedAt > 60_000) return null;
+    return parsed.events;
+  } catch {
+    return null;
+  }
+}
+
+function writeEventsCache(events: EventRow[]) {
+  try {
+    window.sessionStorage.setItem(
+      eventsCacheKey,
+      JSON.stringify({ savedAt: Date.now(), events })
+    );
+  } catch {
+    // Ignore private browsing/session storage errors.
+  }
+}
+
+function readTargetsCache(eventId: string) {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(targetsCacheKey(eventId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { savedAt: number; targets: EventRow["targets"] };
+    if (!parsed.savedAt || Date.now() - parsed.savedAt > 45_000) return null;
+    return parsed.targets;
+  } catch {
+    return null;
+  }
+}
+
+function writeTargetsCache(eventId: string, targets: EventRow["targets"]) {
+  try {
+    window.sessionStorage.setItem(
+      targetsCacheKey(eventId),
+      JSON.stringify({ savedAt: Date.now(), targets })
+    );
+  } catch {
+    // Ignore private browsing/session storage errors.
+  }
+}
+
 export default function LiffPaymentPage() {
   const liffId = process.env.NEXT_PUBLIC_LIFF_ID ?? "";
   const [mode, setMode] = useState<LiffMode>("pay");
@@ -133,9 +203,20 @@ export default function LiffPaymentPage() {
   const [myPayments, setMyPayments] = useState<MyPayment[]>([]);
   const [contactUrl, setContactUrl] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipPreviewUrl, setSlipPreviewUrl] = useState<string | null>(null);
+  const [uploadState, setUploadState] = useState<UploadState>({ phase: "idle" });
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [targetsLoading, setTargetsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!slipFile) return;
+    const url = URL.createObjectURL(slipFile);
+    setSlipPreviewUrl(url);
+    setUploadState({ phase: "ready", message: "เลือกรูปสลิปแล้ว กดอัปโหลดเพื่อส่งให้ระบบ" });
+    return () => URL.revokeObjectURL(url);
+  }, [slipFile]);
 
   useEffect(() => {
     async function boot() {
@@ -211,12 +292,47 @@ export default function LiffPaymentPage() {
       setNotice("ยังไม่พบ QR ที่สร้างไว้ กรุณาเลือกงานและรายชื่อก่อนส่งสลิป");
     }
 
+    const cachedEvents = readEventsCache();
+    if (cachedEvents?.length) {
+      setEvents(cachedEvents);
+      setSelectedEventId((current) => current || cachedEvents[0]?.id || "");
+      const eventId = selectedEventId || cachedEvents[0]?.id || "";
+      if (eventId) void loadTargets(eventId, token);
+    }
+
     const eventsData = await jsonFetch<{ events: EventRow[] }>(
-      "/api/liff/events",
+      "/api/liff/events?light=1",
       withLineAccessToken(token)
     );
+    writeEventsCache(eventsData.events);
     setEvents(eventsData.events);
-    setSelectedEventId(eventsData.events[0]?.id ?? "");
+    const firstEventId = eventsData.events[0]?.id ?? "";
+    setSelectedEventId(firstEventId);
+    if (firstEventId) await loadTargets(firstEventId, token);
+  }
+
+  async function loadTargets(eventId: string, token = accessToken) {
+    if (!eventId || !token) return;
+    const cachedTargets = readTargetsCache(eventId);
+    if (cachedTargets) {
+      setEvents((current) =>
+        current.map((event) => (event.id === eventId ? { ...event, targets: cachedTargets } : event))
+      );
+    }
+
+    setTargetsLoading(true);
+    try {
+      const data = await jsonFetch<{ targets: EventRow["targets"] }>(
+        `/api/liff/targets?eventId=${encodeURIComponent(eventId)}`,
+        withLineAccessToken(token)
+      );
+      writeTargetsCache(eventId, data.targets);
+      setEvents((current) =>
+        current.map((event) => (event.id === eventId ? { ...event, targets: data.targets } : event))
+      );
+    } finally {
+      setTargetsLoading(false);
+    }
   }
 
   function switchMode(nextMode: LiffMode) {
@@ -244,11 +360,20 @@ export default function LiffPaymentPage() {
       });
       setSelectedTargetId(targetId);
       setResult(data);
-      const refreshed = await jsonFetch<{ events: EventRow[] }>(
-        "/api/liff/events",
-        withLineAccessToken(accessToken)
+      setEvents((current) =>
+        current.map((event) =>
+          event.id === data.event.id
+            ? {
+                ...event,
+                targets: event.targets.map((target) =>
+                  target.id === targetId
+                    ? { ...target, status: "pending_slip", is_selected: true }
+                    : { ...target, is_selected: false }
+                )
+              }
+            : event
+        )
       );
-      setEvents(refreshed.events);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -257,8 +382,8 @@ export default function LiffPaymentPage() {
   }
 
   async function uploadSlipForTarget(targetId: string, file: File) {
-    if (!accessToken || !targetId) return;
-    setBusy(true);
+    if (!accessToken || !targetId) return null;
+    setUploadState({ phase: "uploading", message: "กำลังอัปโหลดสลิป..." });
     setError(null);
     setNotice(null);
     try {
@@ -267,15 +392,29 @@ export default function LiffPaymentPage() {
       form.set("targetId", targetId);
       form.set("file", file);
       const response = await fetch("/api/liff/slip", { method: "POST", body: form });
-      const data = (await response.json()) as { message?: string; error?: string };
+      const data = (await response.json()) as SlipUploadResponse;
       if (!response.ok) throw new Error(data.error ?? "อัปโหลดสลิปไม่สำเร็จ");
-      setNotice(data.message ?? "รับสลิปแล้ว รอผู้ดูแลตรวจสอบ");
-      setSlipFile(null);
+      const message = data.message ?? "อัปโหลดสลิปเสร็จแล้ว รอผู้ดูแลตรวจสอบ";
+      setUploadState({ phase: "done", message });
+      setNotice(message);
+      setResult((current) =>
+        current?.target.id === targetId
+          ? { ...current, target: { ...current.target, status: data.alreadyVerified ? "verified" : "manual_review" } }
+          : current
+      );
       if (mode === "me") await loadMode("me");
+      return data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setUploadState({ phase: "error", message });
+      setError(message);
+      return null;
     } finally {
-      setBusy(false);
+      setUploadState((current) =>
+        current.phase === "uploading"
+          ? { phase: "idle" }
+          : current
+      );
     }
   }
 
@@ -343,6 +482,7 @@ export default function LiffPaymentPage() {
                     setSelectedTargetId("");
                     setResult(null);
                     setSearch("");
+                    void loadTargets(event.target.value);
                   }}
                 >
                   {events.map((event) => (
@@ -372,7 +512,9 @@ export default function LiffPaymentPage() {
                   ) : null}
 
                   <div className="targetList compactTargets">
-                    {filteredTargets.length ? (
+                    {targetsLoading && !filteredTargets.length ? (
+                      <div className="emptyState">กำลังโหลดรายชื่อ...</div>
+                    ) : filteredTargets.length ? (
                       filteredTargets.map((target) => (
                         <button
                           key={target.id}
@@ -403,14 +545,19 @@ export default function LiffPaymentPage() {
             <PaymentAndSlipCard
               result={result}
               slipFile={slipFile}
+              slipPreviewUrl={slipPreviewUrl}
+              uploadState={uploadState}
               busy={busy}
               onFile={setSlipFile}
               onUpload={uploadSlip}
               onChangeName={() => {
                 setResult(null);
                 setSlipFile(null);
+                setSlipPreviewUrl(null);
+                setUploadState({ phase: "idle" });
                 setMode("pay");
                 window.history.replaceState(null, "", "/liff?page=pay");
+                void loadMode("pay");
               }}
             />
           )}
@@ -443,6 +590,8 @@ export default function LiffPaymentPage() {
 function PaymentAndSlipCard(props: {
   result: SelectionResult;
   slipFile: File | null;
+  slipPreviewUrl: string | null;
+  uploadState: UploadState;
   busy: boolean;
   onFile: (file: File | null) => void;
   onUpload: () => void;
@@ -472,9 +621,33 @@ function PaymentAndSlipCard(props: {
               onChange={(event) => props.onFile(event.target.files?.[0] ?? null)}
             />
           </label>
-          {props.slipFile ? <p className="muted liffFileName">{props.slipFile.name}</p> : null}
-          <button className="btn primary liffPrimary" disabled={!props.slipFile || props.busy} onClick={props.onUpload}>
-            {props.busy ? "กำลังอัปโหลด" : "อัปโหลดสลิป"}
+          {props.slipPreviewUrl ? (
+            <div className={`liffSlipPreview ${props.uploadState.phase}`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={props.slipPreviewUrl} alt="รูปสลิปที่เลือก" />
+              <div>
+                <strong>
+                  {props.uploadState.phase === "done"
+                    ? "อัปโหลดสลิปเสร็จแล้ว"
+                    : props.uploadState.phase === "uploading"
+                      ? "กำลังอัปโหลดสลิป"
+                      : "รูปสลิปที่เลือก"}
+                </strong>
+                {props.slipFile ? <p className="liffFileName">{props.slipFile.name}</p> : null}
+                {props.uploadState.message ? <p>{props.uploadState.message}</p> : null}
+              </div>
+            </div>
+          ) : null}
+          <button
+            className="btn primary liffPrimary"
+            disabled={!props.slipFile || props.uploadState.phase === "uploading" || props.busy}
+            onClick={props.onUpload}
+          >
+            {props.uploadState.phase === "uploading"
+              ? "กำลังอัปโหลด..."
+              : props.uploadState.phase === "done"
+                ? "อัปโหลดเสร็จแล้ว"
+                : "อัปโหลดสลิป"}
           </button>
         </>
       )}
@@ -489,10 +662,42 @@ function StatusView(props: {
   payments: MyPayment[];
   busy: boolean;
   onPay: () => void;
-  onUploadSlip: (targetId: string, file: File) => Promise<void>;
+  onUploadSlip: (targetId: string, file: File) => Promise<SlipUploadResponse | null>;
 }) {
   const [files, setFiles] = useState<Record<string, File | null>>({});
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [uploadStates, setUploadStates] = useState<Record<string, UploadState>>({});
+  const previewsRef = useRef<Record<string, string>>({});
   const visiblePayments = props.payments.filter((payment) => payment.event);
+
+  useEffect(() => {
+    previewsRef.current = previews;
+  }, [previews]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(previewsRef.current).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, []);
+
+  function setSlipForPayment(paymentId: string, file: File | null) {
+    setFiles((current) => ({ ...current, [paymentId]: file }));
+    setUploadStates((current) => ({
+      ...current,
+      [paymentId]: file
+        ? { phase: "ready", message: "เลือกรูปสลิปแล้ว กดส่งสลิปเพื่ออัปโหลด" }
+        : { phase: "idle" }
+    }));
+    setPreviews((current) => {
+      if (current[paymentId]) URL.revokeObjectURL(current[paymentId]);
+      if (!file) {
+        const next = { ...current };
+        delete next[paymentId];
+        return next;
+      }
+      return { ...current, [paymentId]: URL.createObjectURL(file) };
+    });
+  }
 
   return (
     <section className="liffCard">
@@ -501,6 +706,7 @@ function StatusView(props: {
           {visiblePayments.map((payment) => {
             const latestSlip = payment.slips[0];
             const canUpload = payment.status !== "verified";
+            const uploadState = uploadStates[payment.id] ?? { phase: "idle" };
             return (
             <article className="paymentStatusCard" key={payment.id}>
               <span className={payment.status === "verified" ? "badge ok" : "badge warn"}>
@@ -527,25 +733,57 @@ function StatusView(props: {
                       type="file"
                       accept="image/png,image/jpeg,image/webp"
                       onChange={(event) =>
-                        setFiles((current) => ({
-                          ...current,
-                          [payment.id]: event.target.files?.[0] ?? null
-                        }))
+                        setSlipForPayment(payment.id, event.target.files?.[0] ?? null)
                       }
                     />
                   </label>
-                  {files[payment.id] ? <span className="fileName">{files[payment.id]?.name}</span> : null}
+                  {previews[payment.id] ? (
+                    <div className={`statusSlipPreview ${uploadState.phase}`}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={previews[payment.id]} alt="รูปสลิปที่เลือก" />
+                      <span className="fileName">{files[payment.id]?.name}</span>
+                      {uploadState.message ? <small>{uploadState.message}</small> : null}
+                    </div>
+                  ) : files[payment.id] ? (
+                    <span className="fileName">{files[payment.id]?.name}</span>
+                  ) : null}
                   <button
                     className="btn primary compactBtn"
-                    disabled={!files[payment.id] || props.busy}
+                    disabled={!files[payment.id] || uploadState.phase === "uploading" || props.busy}
                     onClick={async () => {
                       const file = files[payment.id];
                       if (!file) return;
-                      await props.onUploadSlip(payment.id, file);
-                      setFiles((current) => ({ ...current, [payment.id]: null }));
+                      setUploadStates((current) => ({
+                        ...current,
+                        [payment.id]: { phase: "uploading", message: "กำลังอัปโหลดสลิป..." }
+                      }));
+                      try {
+                        const uploaded = await props.onUploadSlip(payment.id, file);
+                        setUploadStates((current) => ({
+                          ...current,
+                          [payment.id]: uploaded
+                            ? {
+                                phase: "done",
+                                message: uploaded.message ?? "อัปโหลดสลิปเสร็จแล้ว รอผู้ดูแลตรวจสอบ"
+                              }
+                            : { phase: "error", message: "อัปโหลดสลิปไม่สำเร็จ กรุณาลองใหม่" }
+                        }));
+                      } catch (error) {
+                        setUploadStates((current) => ({
+                          ...current,
+                          [payment.id]: {
+                            phase: "error",
+                            message: error instanceof Error ? error.message : String(error)
+                          }
+                        }));
+                      }
                     }}
                   >
-                    {props.busy ? "กำลังส่ง" : "ส่งสลิป"}
+                    {uploadState.phase === "uploading"
+                      ? "กำลังส่ง..."
+                      : uploadState.phase === "done"
+                        ? "ส่งแล้ว"
+                        : "ส่งสลิป"}
                   </button>
                 </div>
               ) : null}

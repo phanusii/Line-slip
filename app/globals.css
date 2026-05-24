@@ -2167,6 +2167,63 @@ tbody tr:hover {
   white-space: nowrap;
 }
 
+.liffSlipPreview,
+.statusSlipPreview {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e5eaf2;
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 74px minmax(0, 1fr);
+  padding: 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.liffSlipPreview.done,
+.statusSlipPreview.done {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.liffSlipPreview.error,
+.statusSlipPreview.error {
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.liffSlipPreview img,
+.statusSlipPreview img {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  height: 74px;
+  object-fit: cover;
+  width: 74px;
+}
+
+.liffSlipPreview strong {
+  color: var(--text);
+  display: block;
+  font-size: 13px;
+  line-height: 1.25;
+  margin-bottom: 3px;
+}
+
+.liffSlipPreview p,
+.statusSlipPreview small {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.statusSlipPreview {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 780px) {
   body {
     background: #f6f8fc;

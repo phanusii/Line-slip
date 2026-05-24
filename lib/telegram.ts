@@ -5,12 +5,15 @@ import { applySlipStatus } from "@/lib/slip-status";
 import { createServiceClient } from "@/lib/supabase/server";
 
 type TelegramAction = "verified" | "rejected";
-type EventMenuAction = "targets" | "slips";
+type EventMenuAction = "targets" | "slips" | "unpaid";
+type TargetFilter = "all" | "unpaid" | "paid";
 
 const telegramButtons = {
   events: "📋 งานทั้งหมด",
-  pending: "🔔 สลิปรอตรวจ",
+  pending: "🔔 รอตรวจ",
   latest: "🧾 สลิปล่าสุด",
+  unpaid: "⏳ ค้างจ่าย",
+  paid: "✅ จ่ายแล้ว",
   help: "❓ ช่วยเหลือ"
 } as const;
 
@@ -75,7 +78,8 @@ function mainKeyboard() {
   return {
     keyboard: [
       [telegramButtons.events, telegramButtons.pending],
-      [telegramButtons.latest, telegramButtons.help]
+      [telegramButtons.latest, telegramButtons.unpaid],
+      [telegramButtons.paid, telegramButtons.help]
     ],
     resize_keyboard: true,
     is_persistent: true,
@@ -162,19 +166,21 @@ function verifyTelegramReviewCallback(token: string, settings: SettingsMap) {
 function signEventMenuCallback(input: {
   eventId: string;
   action: EventMenuAction;
+  filter?: TargetFilter;
   settings: SettingsMap;
 }) {
-  const body = `ev:${slipIdToHex(input.eventId)}:${input.action}`;
+  const body = `ev:${slipIdToHex(input.eventId)}:${input.action}${input.filter ? `:${input.filter}` : ""}`;
   return `${body}:${signBody(body, input.settings).slice(0, 8)}`;
 }
 
 function signEventPageCallback(input: {
   eventId: string;
   type: "targets";
+  filter: TargetFilter;
   page: number;
   settings: SettingsMap;
 }) {
-  const body = `page:${input.type}:${slipIdToHex(input.eventId)}:${input.page.toString(36)}`;
+  const body = `page:${input.type}:${slipIdToHex(input.eventId)}:${input.filter}:${input.page.toString(36)}`;
   return `${body}:${signBody(body, input.settings).slice(0, 8)}`;
 }
 
@@ -195,25 +201,31 @@ function verifySignedCallback(data: string, settings: SettingsMap) {
     throw new Error("ปุ่ม Telegram ไม่ถูกต้อง");
   }
 
-  if (parts[0] === "ev" && parts.length === 4) {
+  if (parts[0] === "ev" && (parts.length === 4 || parts.length === 5)) {
     const action = parts[2];
-    if (action !== "targets" && action !== "slips") throw new Error("เมนู Telegram ไม่ถูกต้อง");
+    const filter = parts.length === 5 ? parts[3] : undefined;
+    if (action !== "targets" && action !== "slips" && action !== "unpaid") throw new Error("เมนู Telegram ไม่ถูกต้อง");
+    if (filter && filter !== "all" && filter !== "unpaid" && filter !== "paid") throw new Error("ตัวกรอง Telegram ไม่ถูกต้อง");
     return {
       kind: "event" as const,
       eventId: slipHexToUuid(parts[1]),
-      action
+      action,
+      filter: (filter ?? (action === "unpaid" ? "unpaid" : "all")) as TargetFilter
     };
   }
 
-  if (parts[0] === "page" && parts.length === 5) {
+  if (parts[0] === "page" && parts.length === 6) {
     const type = parts[1];
     if (type !== "targets") throw new Error("หน้า Telegram ไม่ถูกต้อง");
-    const page = Number.parseInt(parts[3], 36);
+    const filter = parts[3];
+    if (filter !== "all" && filter !== "unpaid" && filter !== "paid") throw new Error("ตัวกรอง Telegram ไม่ถูกต้อง");
+    const page = Number.parseInt(parts[4], 36);
     if (!Number.isFinite(page) || page < 0) throw new Error("หน้า Telegram ไม่ถูกต้อง");
     return {
       kind: "page" as const,
       type,
       eventId: slipHexToUuid(parts[2]),
+      filter: filter as TargetFilter,
       page
     };
   }
@@ -515,7 +527,11 @@ async function handleTelegramMenuCallback(
   }).catch(() => null);
 
   if (menuAction.kind === "event" && menuAction.action === "targets") {
-    await sendTargetsListByEvent(chatId, settings, menuAction.eventId, 0);
+    await sendTargetsListByEvent(chatId, settings, menuAction.eventId, menuAction.filter, 0);
+    return;
+  }
+  if (menuAction.kind === "event" && menuAction.action === "unpaid") {
+    await sendTargetsListByEvent(chatId, settings, menuAction.eventId, "unpaid", 0);
     return;
   }
   if (menuAction.kind === "event" && menuAction.action === "slips") {
@@ -523,7 +539,7 @@ async function handleTelegramMenuCallback(
     return;
   }
   if (menuAction.kind === "page") {
-    await sendTargetsListByEvent(chatId, settings, menuAction.eventId, menuAction.page);
+    await sendTargetsListByEvent(chatId, settings, menuAction.eventId, menuAction.filter, menuAction.page);
   }
 }
 
@@ -574,6 +590,14 @@ async function handleTelegramCommand(message: TelegramMessage) {
     await sendSlipsList(chatId, settings, "latest");
     return;
   }
+  if (text === telegramButtons.unpaid) {
+    await sendCrossEventTargetSummary(chatId, settings, "unpaid");
+    return;
+  }
+  if (text === telegramButtons.paid) {
+    await sendCrossEventTargetSummary(chatId, settings, "paid");
+    return;
+  }
   if (text === telegramButtons.help) {
     await sendTelegramHelp(chatId, settings);
   }
@@ -590,9 +614,75 @@ async function sendTelegramHelp(chatId: string, settings: SettingsMap) {
       "เลือกเมนูจากปุ่มด้านล่างได้เลย",
       `${telegramButtons.events} ดูงานทั้งหมดและเลือกดูรายชื่อ`,
       `${telegramButtons.pending} เปิดคิวสลิปรอตรวจ`,
-      `${telegramButtons.latest} ดูสลิปล่าสุด`
+      `${telegramButtons.latest} ดูสลิปล่าสุด`,
+      `${telegramButtons.unpaid} ดูรายการค้างจ่าย`,
+      `${telegramButtons.paid} ดูรายการจ่ายแล้ว`
     ].join("\n")
   }));
+}
+
+function targetFilterLabel(filter: TargetFilter) {
+  if (filter === "paid") return "จ่ายแล้ว";
+  if (filter === "unpaid") return "ค้างจ่าย";
+  return "ทั้งหมด";
+}
+
+async function sendCrossEventTargetSummary(
+  chatId: string,
+  settings: SettingsMap,
+  filter: Exclude<TargetFilter, "all">
+) {
+  const supabase = createServiceClient();
+  let query = supabase
+    .from("payment_targets")
+    .select("event_id,display_name,amount_due,status,events(id,name)")
+    .neq("status", "deleted")
+    .order("updated_at", { ascending: false })
+    .limit(30);
+
+  query = filter === "paid" ? query.eq("status", "verified") : query.neq("status", "verified");
+
+  const { data, error } = await query;
+  if (error) throw error;
+  if (!data?.length) {
+    await callTelegram(settings, "sendMessage", messageWithMainKeyboard({
+      chat_id: chatId,
+      text: filter === "paid" ? "ยังไม่มีรายการจ่ายแล้ว" : "ไม่มีรายการค้างจ่าย"
+    }));
+    return;
+  }
+
+  const eventMap = new Map<string, { id: string; name: string; count: number; total: number }>();
+  for (const target of data) {
+    const eventRow = Array.isArray(target.events) ? target.events[0] : target.events;
+    const eventId = target.event_id;
+    const current = eventMap.get(eventId) ?? {
+      id: eventId,
+      name: eventRow?.name ?? "ไม่พบชื่องาน",
+      count: 0,
+      total: 0
+    };
+    current.count += 1;
+    current.total += Number(target.amount_due ?? 0);
+    eventMap.set(eventId, current);
+  }
+
+  const events = Array.from(eventMap.values()).slice(0, 10);
+  const lines = events.map(
+    (event) => `• ${event.name} - ${event.count} รายชื่อ - ${event.total.toLocaleString("th-TH")} บาท`
+  );
+  const inlineKeyboard = events.map((event) => [
+    {
+      text: `${targetFilterLabel(filter)}: ${event.name}`.slice(0, 58),
+      callback_data: signEventMenuCallback({ eventId: event.id, action: "targets", filter, settings })
+    }
+  ]);
+
+  await callTelegram(settings, "sendMessage", {
+    chat_id: chatId,
+    text: [`${targetFilterLabel(filter)}ล่าสุด`, ...lines, "", "กดปุ่มเพื่อดูรายชื่อในงาน"].join("\n"),
+    reply_markup: { inline_keyboard: inlineKeyboard }
+  });
 }
 
 async function sendEventsList(chatId: string, settings: SettingsMap) {
@@ -610,12 +700,16 @@ async function sendEventsList(chatId: string, settings: SettingsMap) {
 
   const inlineKeyboard = (data ?? []).map((event) => [
     {
-      text: `รายชื่อ: ${event.name}`.slice(0, 58),
-      callback_data: signEventMenuCallback({ eventId: event.id, action: "targets", settings })
+      text: "รายชื่อ",
+      callback_data: signEventMenuCallback({ eventId: event.id, action: "targets", filter: "all", settings })
     },
     {
       text: "สลิป",
       callback_data: signEventMenuCallback({ eventId: event.id, action: "slips", settings })
+    },
+    {
+      text: "ค้างจ่าย",
+      callback_data: signEventMenuCallback({ eventId: event.id, action: "unpaid", filter: "unpaid", settings })
     },
     {
       text: "เว็บ",
@@ -660,13 +754,14 @@ async function sendTargetsList(chatId: string, settings: SettingsMap, query: str
     return;
   }
 
-  await sendTargetsListByEvent(chatId, settings, event.id, 0);
+  await sendTargetsListByEvent(chatId, settings, event.id, "all", 0);
 }
 
 async function sendTargetsListByEvent(
   chatId: string,
   settings: SettingsMap,
   eventId: string,
+  filter: TargetFilter,
   page: number
 ) {
   const supabase = createServiceClient();
@@ -686,11 +781,19 @@ async function sendTargetsListByEvent(
 
   const from = page * targetPageSize;
   const to = from + targetPageSize - 1;
-  const { data: targets, error, count } = await supabase
+  let targetsQuery = supabase
     .from("payment_targets")
     .select("display_name,amount_due,status", { count: "exact" })
     .eq("event_id", eventId)
-    .neq("status", "deleted")
+    .neq("status", "deleted");
+
+  if (filter === "paid") {
+    targetsQuery = targetsQuery.eq("status", "verified");
+  } else if (filter === "unpaid") {
+    targetsQuery = targetsQuery.neq("status", "verified");
+  }
+
+  const { data: targets, error, count } = await targetsQuery
     .order("display_name")
     .range(from, to);
   if (error) throw error;
@@ -704,17 +807,31 @@ async function sendTargetsListByEvent(
   if (page > 0) {
     pageButtons.push({
       text: "ก่อนหน้า",
-      callback_data: signEventPageCallback({ eventId, type: "targets", page: page - 1, settings })
+      callback_data: signEventPageCallback({ eventId, type: "targets", filter, page: page - 1, settings })
     });
   }
   if ((count ?? 0) > to + 1) {
     pageButtons.push({
       text: "ถัดไป",
-      callback_data: signEventPageCallback({ eventId, type: "targets", page: page + 1, settings })
+      callback_data: signEventPageCallback({ eventId, type: "targets", filter, page: page + 1, settings })
     });
   }
 
   const inlineKeyboard = [
+    [
+      {
+        text: "ทั้งหมด",
+        callback_data: signEventMenuCallback({ eventId, action: "targets", filter: "all", settings })
+      },
+      {
+        text: "ค้างจ่าย",
+        callback_data: signEventMenuCallback({ eventId, action: "targets", filter: "unpaid", settings })
+      },
+      {
+        text: "จ่ายแล้ว",
+        callback_data: signEventMenuCallback({ eventId, action: "targets", filter: "paid", settings })
+      }
+    ],
     [
       {
         text: "ดูสลิปงานนี้",
@@ -731,7 +848,7 @@ async function sendTargetsListByEvent(
   await callTelegram(settings, "sendMessage", {
     chat_id: chatId,
     text: lines.length
-      ? [`รายชื่อ: ${event.name}`, `หน้า ${page + 1}`, ...lines].join("\n")
+      ? [`รายชื่อ: ${event.name}`, `ตัวกรอง: ${targetFilterLabel(filter)} · หน้า ${page + 1}`, ...lines].join("\n")
       : "ยังไม่มีรายชื่อในงานนี้",
     reply_markup: { inline_keyboard: inlineKeyboard }
   });
