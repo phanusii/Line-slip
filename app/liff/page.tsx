@@ -109,6 +109,11 @@ function shouldSendStatusCardToChat() {
   return new URLSearchParams(window.location.search).get("send") === "1";
 }
 
+function isLiffScopeError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes("permission is not in liff app scope");
+}
+
 function liffDeepLink(liffId: string, page: LiffMode) {
   return liffId ? `https://liff.line.me/${liffId}?page=${page}` : `${window.location.origin}/liff?page=${page}`;
 }
@@ -427,12 +432,11 @@ export default function LiffPaymentPage() {
       ])
       .then(() => window.liff?.closeWindow())
       .catch((err) => {
-        setNotice(null);
-        setError(
-          err instanceof Error
-            ? `ส่งการ์ดกลับแชทไม่สำเร็จ: ${err.message}`
-            : "ส่งการ์ดกลับแชทไม่สำเร็จ กรุณาดูสถานะจากหน้านี้"
-        );
+        if (isLiffScopeError(err)) {
+          setNotice("LIFF ยังไม่ได้เปิดสิทธิ์ส่งข้อความเข้าแชท ระบบจึงแสดงสถานะบนหน้านี้แทน");
+          return;
+        }
+        setNotice("ส่งการ์ดกลับแชทไม่สำเร็จ ระบบจึงแสดงสถานะบนหน้านี้แทน");
       });
   }, [mode, booting, busy, chatStatusSent, myPayments, liffId]);
 

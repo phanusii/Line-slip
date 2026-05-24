@@ -24,7 +24,7 @@ export function liffUri(page?: LiffPage, extraParams?: Record<string, string>) {
 }
 
 export function liffStatusCardUri() {
-  return liffUri("me", { send: "1" });
+  return liffUri("me");
 }
 
 export function lineMenuMessages(text: string) {
