@@ -94,6 +94,8 @@ type EventDetail = {
       available?: boolean;
       confidence?: number | null;
       amountMatched?: boolean | null;
+      amounts?: number[];
+      selectedAmount?: number | null;
       text?: string;
       error?: string;
     } | null;
@@ -129,8 +131,10 @@ const autoReasonLabels: Record<string, string> = {
   line_user_mismatch: "LINE user ไม่ตรงกับผู้เลือกชื่อ",
   selection_window_expired: "เกินเวลาหลังสร้าง QR",
   amount_not_unique_in_event: "ยอดไม่ unique ในงานนี้",
+  ocr_disabled: "ยังไม่ได้เปิด OCR",
   ocr_unavailable: "OCR ใช้งานไม่ได้",
   ocr_low_confidence: "OCR ไม่มั่นใจ",
+  ocr_amount_missing: "OCR ไม่พบยอดทศนิยม 2 ตำแหน่ง",
   ocr_amount_mismatch: "OCR อ่านยอดไม่ตรง",
   free_auto_review_passed: "ผ่านทุกเงื่อนไข",
   duplicate_slip_qr: "QR สลิปซ้ำ",
@@ -1143,6 +1147,9 @@ export default function Home() {
                           <span className={slip.auto_check_status === "passed" ? "badge ok" : "badge"}>
                             {slip.auto_check_status ?? "-"}
                           </span>
+                          <p className="muted compactReason">
+                            OCR: {slip.amount_detected !== null ? formatMoney(slip.amount_detected) : "-"}
+                          </p>
                           <p className="muted compactReason">{autoReasonText(slip.auto_check_reasons)}</p>
                         </td>
                         <td>{formatBytes(slip.file_size)}</td>
@@ -1210,6 +1217,7 @@ export default function Home() {
                       <div className="wideMetric">
                         <span>ตรวจอัตโนมัติ</span>
                         <strong>{slip.auto_check_status ?? "-"}</strong>
+                        <p>OCR: {slip.amount_detected !== null ? formatMoney(slip.amount_detected) : "-"}</p>
                         <p>{autoReasonText(slip.auto_check_reasons)}</p>
                       </div>
                     </div>
@@ -1255,7 +1263,7 @@ export default function Home() {
             <div>
               <h2>ตรวจสลิปอัตโนมัติจากรูป</h2>
               <p className="muted">
-                ใช้ QR บนสลิป, hash กันซ้ำ, ยอดเฉพาะรายชื่อ และเวลาเลือก QR วิธีนี้ไม่ใช่การยืนยันจากธนาคาร
+                ใช้ OCR อ่านยอดทศนิยม 2 ตำแหน่งร่วมกับ QR บนสลิป, hash กันซ้ำ และเวลาเลือก QR วิธีนี้ไม่ใช่การยืนยันจากธนาคาร
               </p>
             </div>
             <span className={autoVerifyFromSlipEnabled ? "badge warn" : "badge"}>
@@ -1285,7 +1293,7 @@ export default function Home() {
                 checked={autoVerifyRequiresUniqueAmount}
                 onChange={(e) => setAutoVerifyRequiresUniqueAmount(e.target.checked)}
               />
-              <span>ต้องเป็นยอดเฉพาะรายชื่อในงานเดียวกัน</span>
+              <span>ยอดนี้ต้องตรงกับรายชื่อนี้ในงานนี้เท่านั้น</span>
             </label>
             <label className="checkField">
               <input
@@ -1293,7 +1301,7 @@ export default function Home() {
                 checked={autoVerifyOcrEnabled}
                 onChange={(e) => setAutoVerifyOcrEnabled(e.target.checked)}
               />
-              <span>เปิด OCR ฟรีเป็นด่านเสริม</span>
+              <span>เปิด OCR ฟรีเพื่อเช็กยอดทศนิยม 2 ตำแหน่ง</span>
             </label>
             <label className="field">
               <span>ช่วงเวลาหลังสร้าง QR (ชั่วโมง)</span>
@@ -1310,7 +1318,7 @@ export default function Home() {
             <strong>เงื่อนไขที่ต้องผ่านทั้งหมด</strong>
             <p>
               ผู้ปกครองเลือกชื่อผ่าน LIFF, target ยังไม่จ่าย, รูปและ QR ไม่ซ้ำ, พบ QR บนสลิป,
-              ยอดไม่ซ้ำในงานเดียวกัน และส่งภายในเวลาที่ตั้งไว้
+              OCR อ่านยอดตรงแบบสตางค์เป๊ะ, ยอดไม่ซ้ำในงานเดียวกัน และส่งภายในเวลาที่ตั้งไว้
             </p>
           </div>
 

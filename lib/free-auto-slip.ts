@@ -16,6 +16,8 @@ type OcrResult = {
   available: boolean;
   confidence: number | null;
   amountMatched: boolean | null;
+  amounts?: number[];
+  selectedAmount?: number | null;
   text?: string;
   error?: string;
 };
@@ -25,14 +27,15 @@ export type FreeAutoSlipCheckResult = {
   status: "passed" | "manual_review" | "disabled";
   reasons: string[];
   ocrResult?: OcrResult;
+  amountDetected?: number | null;
 };
 
-function money(value: number) {
-  return Math.round(value * 100) / 100;
+function toSatang(value: number) {
+  return Number.isFinite(value) ? Math.round(value * 100) : null;
 }
 
 function parseAmounts(text: string) {
-  return Array.from(text.matchAll(/\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2}/g))
+  return Array.from(text.matchAll(/(?<![\d.,])\d{1,3}(?:,\d{3})*\.\d{2}(?![\d.,])|(?<![\d.,])\d+\.\d{2}(?![\d.,])/g))
     .map((match) => Number(match[0].replace(/,/g, "")))
     .filter(Number.isFinite);
 }
@@ -48,9 +51,17 @@ async function runFreeOcr(buffer: Buffer, expectedAmount?: number | null): Promi
     const text = result.data.text ?? "";
     const confidence = Number(result.data.confidence ?? 0);
     const amounts = parseAmounts(text);
-    const amountMatched =
+    const expectedSatang =
       typeof expectedAmount === "number" && Number.isFinite(expectedAmount)
-        ? amounts.some((amount) => money(amount) === money(expectedAmount))
+        ? toSatang(expectedAmount)
+        : null;
+    const selectedAmount =
+      expectedSatang === null
+        ? null
+        : amounts.find((amount) => toSatang(amount) === expectedSatang) ?? null;
+    const amountMatched =
+      expectedSatang !== null
+        ? selectedAmount !== null
         : null;
 
     return {
@@ -58,6 +69,8 @@ async function runFreeOcr(buffer: Buffer, expectedAmount?: number | null): Promi
       available: true,
       confidence,
       amountMatched,
+      amounts,
+      selectedAmount,
       text: clippedText(text)
     };
   } catch (error) {
@@ -66,6 +79,8 @@ async function runFreeOcr(buffer: Buffer, expectedAmount?: number | null): Promi
       available: false,
       confidence: null,
       amountMatched: null,
+      amounts: [],
+      selectedAmount: null,
       error: error instanceof Error ? error.message : String(error)
     };
   }
@@ -144,25 +159,36 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
     }
   }
 
-  if (ocrEnabled) {
+  if (!ocrEnabled) {
+    reasons.push("ocr_disabled");
+  } else {
     ocrResult = await runFreeOcr(input.normalizedBuffer, input.amountExpected);
     if (!ocrResult.available) {
       reasons.push("ocr_unavailable");
     } else if ((ocrResult.confidence ?? 0) < 45) {
       reasons.push("ocr_low_confidence");
+    } else if (!ocrResult.amounts?.length) {
+      reasons.push("ocr_amount_missing");
     } else if (ocrResult.amountMatched === false) {
       reasons.push("ocr_amount_mismatch");
     }
   }
 
   if (reasons.length) {
-    return { shouldVerify: false, status: "manual_review", reasons, ocrResult };
+    return {
+      shouldVerify: false,
+      status: "manual_review",
+      reasons,
+      ocrResult,
+      amountDetected: ocrResult?.selectedAmount ?? null
+    };
   }
 
   return {
     shouldVerify: true,
     status: "passed",
     reasons: ["free_auto_review_passed"],
-    ocrResult
+    ocrResult,
+    amountDetected: ocrResult?.selectedAmount ?? null
   };
 }

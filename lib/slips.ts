@@ -205,6 +205,7 @@ export async function uploadSlipImage(input: UploadSlipInput) {
   const autoCheckUpdated = await supabase
     .from("slip_submissions")
     .update({
+      amount_detected: autoCheck.amountDetected ?? null,
       auto_check_status: autoCheck.status,
       auto_check_reasons: autoCheck.reasons,
       auto_checked_at: new Date().toISOString(),
