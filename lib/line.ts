@@ -73,7 +73,16 @@ export function verifyLineSignature(body: string, signature: string | null) {
   return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }
 
+export function lineOutboundMessagesEnabled() {
+  return process.env.LINE_OUTBOUND_MESSAGES === "enabled";
+}
+
 export async function replyLine(replyToken: string, messages: unknown[]) {
+  if (!lineOutboundMessagesEnabled()) {
+    console.log("LINE reply skipped because outbound LINE messages are disabled");
+    return;
+  }
+
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
   if (!token) return;
 
@@ -94,6 +103,10 @@ export async function replyLine(replyToken: string, messages: unknown[]) {
 }
 
 export async function pushLine(lineUserId: string, messages: unknown[]) {
+  if (!lineOutboundMessagesEnabled()) {
+    return { ok: false, skipped: true, error: "Outbound LINE messages are disabled" };
+  }
+
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
   if (!token) return { ok: false, error: "LINE_CHANNEL_ACCESS_TOKEN is not configured" };
 

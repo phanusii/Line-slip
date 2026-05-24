@@ -46,7 +46,7 @@ export async function getSettings(keys: readonly SettingKey[] = SETTING_KEYS) {
 }
 
 export function getLinePushPolicy(settings: SettingsMap) {
-  return settings.line_push_policy === "disabled" ? "disabled" : "quota_aware";
+  return "disabled";
 }
 
 export function getAdminReviewChannel(settings: SettingsMap) {

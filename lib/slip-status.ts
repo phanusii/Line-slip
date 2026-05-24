@@ -1,6 +1,4 @@
 import { actorFromRequest } from "@/lib/auth";
-import { getLineMessageQuota, pushLine } from "@/lib/line";
-import { getLinePushPolicy, getSettings } from "@/lib/settings";
 import { createServiceClient } from "@/lib/supabase/server";
 
 const finalStatuses = new Set(["verified", "rejected"]);
@@ -122,56 +120,18 @@ async function notifyLineUserAfterReview(input: {
   } | null;
   reason?: string | null;
 }) {
-  const settings = await getSettings(["line_push_policy"]);
-  if (getLinePushPolicy(settings) === "disabled") return;
-
-  const quota = await getLineMessageQuota();
   const supabase = createServiceClient();
-  if (!quota.canPush) {
-    await supabase.from("audit_logs").insert({
-      actor_email: "system",
-      actor_role: "viewer",
-      action: "line_push_skipped_quota",
-      entity_type: "slip_submission",
-      entity_id: input.slipId,
-      after_data: quota,
-      reason: "LINE quota ไม่พอหรือเช็กได้เป็นโหมดไม่จำกัด/ไม่ทราบค่า"
-    });
-    return;
-  }
-
-  const lineUserUuid = input.slipLineUserId ?? input.target?.selected_line_user_id;
-  if (!lineUserUuid) return;
-
-  const { data: lineUser, error } = await supabase
-    .from("line_users")
-    .select("line_user_id")
-    .eq("id", lineUserUuid)
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!lineUser?.line_user_id) return;
-
-  const eventRow = Array.isArray(input.target?.events)
-    ? input.target?.events[0]
-    : input.target?.events;
-  const eventName = eventRow?.name ?? "งานที่เลือกไว้";
-  const amount = Number(input.target?.amount_due ?? 0).toLocaleString("th-TH");
-  const displayName = input.target?.display_name ?? "รายชื่อของคุณ";
-
-  const text =
-    input.status === "verified"
-      ? `✅ จ่ายเรียบร้อย\n${eventName}\n${displayName}\nยอด ${amount} บาท`
-      : `❌ สลิปไม่ถูกต้อง\n${eventName}\n${displayName}\n${input.reason ? `เหตุผล: ${input.reason}` : "กรุณาติดต่อผู้ดูแลหรือส่งสลิปใหม่"}`;
-
-  const pushed = await pushLine(lineUser.line_user_id, [{ type: "text", text }]);
   await supabase.from("audit_logs").insert({
     actor_email: "system",
     actor_role: "viewer",
-    action: pushed.ok ? "line_push_sent" : "line_push_failed",
+    action: "line_push_disabled",
     entity_type: "slip_submission",
     entity_id: input.slipId,
-    after_data: { quota, push: pushed },
-    reason: "แจ้งผลตรวจสลิปให้ผู้ใช้ทาง LINE"
+    after_data: {
+      status: input.status,
+      slip_line_user_id: input.slipLineUserId ?? null,
+      target_line_user_id: input.target?.selected_line_user_id ?? null
+    },
+    reason: "ปิดการแจ้งเตือนผู้ใช้ทาง LINE เพื่อไม่ใช้โควตา Messaging API"
   });
 }

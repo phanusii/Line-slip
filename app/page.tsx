@@ -261,7 +261,7 @@ export default function Home() {
   const [newTargetsText, setNewTargetsText] = useState(uniqueTargetsText);
   const [newUniqueAmountSuffix, setNewUniqueAmountSuffix] = useState(true);
   const [contactUrl, setContactUrl] = useState("");
-  const [linePushPolicy, setLinePushPolicy] = useState("quota_aware");
+  const [linePushPolicy, setLinePushPolicy] = useState("disabled");
   const [adminReviewChannel, setAdminReviewChannel] = useState("dashboard_only");
   const [autoVerifyFromSlipEnabled, setAutoVerifyFromSlipEnabled] = useState(false);
   const [autoVerifyWindowHours, setAutoVerifyWindowHours] = useState("24");
@@ -391,7 +391,7 @@ export default function Home() {
     try {
       const { settings } = await api<{ settings: Record<string, string> }>("/api/admin/settings");
       setContactUrl(settings.contact_url ?? "");
-      setLinePushPolicy(settings.line_push_policy ?? "quota_aware");
+      setLinePushPolicy(settings.line_push_policy ?? "disabled");
       setAdminReviewChannel(settings.admin_review_channel ?? "dashboard_only");
       setAutoVerifyFromSlipEnabled(settingEnabled(settings.auto_verify_from_slip_enabled, false));
       setAutoVerifyWindowHours(settings.auto_verify_window_hours ?? "24");
@@ -1583,8 +1583,7 @@ export default function Home() {
               <label className="field">
                 <span>LINE push policy</span>
                 <select value={linePushPolicy} onChange={(e) => setLinePushPolicy(e.target.value)}>
-                  <option value="quota_aware">เช็กโควตาก่อน push</option>
-                  <option value="disabled">ไม่ใช้ push</option>
+                  <option value="disabled">ปิดทั้งหมด ไม่ส่ง LINE push</option>
                 </select>
               </label>
               <label className="field">
