@@ -843,7 +843,7 @@ export default function Home() {
               </button>
             </div>
           </div>
-          <div className="tableWrap">
+          <div className="tableWrap desktopOnly">
             <table className="dataTable">
               <thead>
                 <tr>
@@ -913,6 +913,66 @@ export default function Home() {
               </tbody>
             </table>
           </div>
+          <div className="mobileCardList mobileOnly">
+            {events.map((event) => (
+              <article className="mobileRecordCard" key={event.id}>
+                <div className="mobileRecordHeader">
+                  <div>
+                    <h3>{event.name}</h3>
+                    <p>{event.slug}</p>
+                  </div>
+                  <span className={event.unpaid_count ? "badge warn" : "badge ok"}>
+                    {event.unpaid_count ? "ยังไม่ครบ" : "ครบแล้ว"}
+                  </span>
+                </div>
+                <div className="mobileMetricGrid">
+                  <div>
+                    <span>ยอดรวม</span>
+                    <strong>{formatMoney(event.expected_total)}</strong>
+                  </div>
+                  <div>
+                    <span>จ่ายแล้ว</span>
+                    <strong>{event.paid_count}</strong>
+                  </div>
+                  <div>
+                    <span>ยังไม่จ่าย</span>
+                    <strong>{event.unpaid_count}</strong>
+                  </div>
+                  <div>
+                    <span>สลิป</span>
+                    <strong>{event.slip_count}</strong>
+                  </div>
+                </div>
+                <div className="mobileActionGrid">
+                  <button
+                    className={selectedEventId === event.id ? "btn selected" : "btn subtle"}
+                    onClick={() => selectEvent(event.id)}
+                  >
+                    เปิดงาน
+                  </button>
+                  <button
+                    className="btn subtle"
+                    onClick={() =>
+                      authenticatedDownload(`/api/admin/events/${event.id}/export.csv`)
+                    }
+                  >
+                    ไฟล์สรุป
+                  </button>
+                  <button
+                    className="btn subtle"
+                    onClick={() =>
+                      authenticatedDownload(`/api/admin/events/${event.id}/slips.zip`)
+                    }
+                  >
+                    ดาวน์โหลดสลิป
+                  </button>
+                  <button className="btn danger" onClick={() => setCleanup({ mode: "files", event })}>
+                    ลบรูป
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
         </section>
 
         {selectedEvent && detail ? (
@@ -946,7 +1006,7 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              <div className="tableWrap">
+              <div className="tableWrap desktopOnly">
                 <table className="dataTable compactTable">
                   <thead>
                     <tr>
@@ -969,6 +1029,21 @@ export default function Home() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+              <div className="mobileCardList mobileOnly">
+                {targetRows.map((target) => (
+                  <article className="mobileRecordCard compactMobileCard" key={target.id}>
+                    <div className="mobileRecordHeader">
+                      <div>
+                        <h3>{target.display_name}</h3>
+                        <p>{formatMoney(target.amount_due)} บาท</p>
+                      </div>
+                      <span className={target.status === "verified" ? "badge ok" : "badge warn"}>
+                        {statusLabels[target.status] ?? target.status}
+                      </span>
+                    </div>
+                  </article>
+                ))}
               </div>
               <div className="actions panelActions">
                 <button
@@ -1041,7 +1116,7 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              <div className="tableWrap">
+              <div className="tableWrap desktopOnly">
                 <table className="dataTable compactTable">
                   <thead>
                     <tr>
@@ -1110,6 +1185,66 @@ export default function Home() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+              <div className="mobileCardList mobileOnly">
+                {slipRows.map((slip) => (
+                  <article className="mobileRecordCard" key={slip.id}>
+                    <div className="mobileRecordHeader">
+                      <div>
+                        <h3>{slip.payment_targets?.display_name ?? "-"}</h3>
+                        <p>{new Date(slip.created_at).toLocaleString("th-TH")}</p>
+                      </div>
+                      <span className={slip.status === "verified" ? "badge ok" : "badge"}>
+                        {statusLabels[slip.status] ?? slip.status}
+                      </span>
+                    </div>
+                    <div className="mobileMetricGrid">
+                      <div>
+                        <span>ยอด</span>
+                        <strong>{formatMoney(slip.amount_expected)}</strong>
+                      </div>
+                      <div>
+                        <span>ขนาด</span>
+                        <strong>{formatBytes(slip.file_size)}</strong>
+                      </div>
+                      <div className="wideMetric">
+                        <span>ตรวจอัตโนมัติ</span>
+                        <strong>{slip.auto_check_status ?? "-"}</strong>
+                        <p>{autoReasonText(slip.auto_check_reasons)}</p>
+                      </div>
+                    </div>
+                    <div className="mobileActionGrid">
+                      <button
+                        className="btn subtle"
+                        disabled={!slip.storage_path || Boolean(slip.file_deleted_at)}
+                        onClick={() => openSlip(slip.id)}
+                      >
+                        เปิด
+                      </button>
+                      <button
+                        className="btn subtle"
+                        disabled={!slip.storage_path || Boolean(slip.file_deleted_at)}
+                        onClick={() => authenticatedDownload(`/api/admin/slips/${slip.id}/download`)}
+                      >
+                        โหลด
+                      </button>
+                      <button
+                        className="btn subtle"
+                        disabled={busy || slip.status === "verified"}
+                        onClick={() => updateSlipStatus(slip.id, "verified")}
+                      >
+                        อนุมัติ
+                      </button>
+                      <button
+                        className="btn danger"
+                        disabled={busy || slip.status === "rejected"}
+                        onClick={() => updateSlipStatus(slip.id, "rejected")}
+                      >
+                        ปฏิเสธ
+                      </button>
+                    </div>
+                  </article>
+                ))}
               </div>
             </div>
           </section>

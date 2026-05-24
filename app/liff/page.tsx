@@ -298,7 +298,7 @@ export default function LiffPaymentPage() {
 
   return (
     <main className="liffShell withFloatingBar">
-      <section className="liffHero compactLiffHero">
+      <section className={result ? "liffHero compactLiffHero liffHeroWithResult" : "liffHero compactLiffHero"}>
         <span className="brandKicker">LINE Payment</span>
         <h1>{mode === "me" ? "สถานะของฉัน" : mode === "slip" ? "ส่งสลิป" : "สร้าง QR Code"}</h1>
         <p>
@@ -466,7 +466,7 @@ function PaymentAndSlipCard(props: {
           onChange={(event) => props.onFile(event.target.files?.[0] ?? null)}
         />
       </label>
-      {props.slipFile ? <p className="muted">{props.slipFile.name}</p> : null}
+      {props.slipFile ? <p className="muted liffFileName">{props.slipFile.name}</p> : null}
       <button className="btn primary liffPrimary" disabled={!props.slipFile || props.busy} onClick={props.onUpload}>
         {props.busy ? "กำลังอัปโหลด" : "อัปโหลดสลิป"}
       </button>
