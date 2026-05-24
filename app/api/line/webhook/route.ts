@@ -114,9 +114,9 @@ export async function POST(request: NextRequest) {
     const activeSelection = user?.data
       ? await supabase
           .from("payment_targets")
-          .select("id,event_id,display_name,amount_due,events(id,slug)")
+          .select("id,event_id,display_name,amount_due,status,events(id,slug)")
           .eq("selected_line_user_id", user.data.id)
-          .neq("status", "verified")
+          .neq("status", "deleted")
           .order("updated_at", { ascending: false })
           .limit(1)
           .single()
@@ -128,6 +128,15 @@ export async function POST(request: NextRequest) {
           event.replyToken,
           lineMenuMessages("ยังไม่พบรายชื่อที่เลือกไว้ กรุณากดสร้าง QR และเลือกรายชื่อก่อนส่งสลิป")
         );
+      }
+      continue;
+    }
+
+    if (activeSelection.data.status === "verified") {
+      if (event.replyToken) {
+        await replyLine(event.replyToken, [
+          { type: "text", text: "✅ รายการนี้จ่ายเรียบร้อยแล้ว ไม่ต้องส่งสลิปเพิ่มค่ะ" }
+        ]);
       }
       continue;
     }
@@ -169,7 +178,7 @@ export async function POST(request: NextRequest) {
       if (event.replyToken) {
         if (slip.status === "duplicate_slip") {
           await replyLine(event.replyToken, [
-            { type: "text", text: "❌ สลิปนี้เคยถูกส่งแล้ว ไม่สามารถใช้สลิปซ้ำได้ค่ะ" }
+            { type: "text", text: "❌ สลิปนี้เคยถูกส่งแล้ว ระบบบันทึกไว้เป็นสลิปซ้ำ ไม่ใช้ยืนยันการจ่ายค่ะ" }
           ]);
         } else if (slip.status === "verified") {
           await replyLine(event.replyToken, [
@@ -180,7 +189,7 @@ export async function POST(request: NextRequest) {
           ]);
         } else {
           await replyLine(event.replyToken, [
-            { type: "text", text: "📋 รับสลิปแล้วค่ะ ระบบบันทึกไฟล์เรียบร้อยแล้ว จะแจ้งผลการตรวจสอบให้ทราบภายหลัง" }
+            { type: "text", text: "📋 รับสลิปใหม่แล้วค่ะ ระบบจะใช้ใบล่าสุดให้แอดมินตรวจ" }
           ]);
         }
       }

@@ -29,7 +29,6 @@ export async function POST(request: NextRequest) {
       .from("payment_targets")
       .select("id,event_id,display_name,amount_due,status,events(id,name,slug,promptpay_id,is_open,archived_at)")
       .eq("selected_line_user_id", lineUser.id)
-      .neq("status", "verified")
       .neq("status", "deleted")
       .order("updated_at", { ascending: false })
       .limit(1)

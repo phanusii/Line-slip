@@ -750,6 +750,181 @@ tbody tr:hover {
   object-fit: contain;
 }
 
+.slipGallery {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+}
+
+.slipGalleryCard {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow-soft);
+  display: grid;
+  overflow: hidden;
+}
+
+.slipThumb {
+  align-items: center;
+  aspect-ratio: 4 / 5;
+  background: #f3f6fb;
+  color: var(--muted);
+  display: flex;
+  font-weight: 900;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  width: 100%;
+}
+
+.slipThumb img,
+.historySlip img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.slipGalleryBody {
+  display: grid;
+  gap: 11px;
+  padding: 13px;
+}
+
+.slipGalleryTop {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.slipGalleryTop h3 {
+  font-size: 17px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.slipGalleryTop p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 3px 0 0;
+}
+
+.slipFacts {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.slipFacts div {
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
+  border-radius: 12px;
+  display: grid;
+  gap: 3px;
+  padding: 9px;
+}
+
+.slipFacts span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.slipFacts strong {
+  color: var(--text);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.slipActions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.slipHistory {
+  border-top: 1px solid #edf2f7;
+  padding-top: 8px;
+}
+
+.slipHistory summary {
+  color: var(--brand);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.slipHistory > div {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.historySlip {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
+  border-radius: 12px;
+  color: var(--text);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  min-height: 54px;
+  padding: 6px;
+  text-align: left;
+}
+
+.historySlip img,
+.historySlip span {
+  background: #e9eef7;
+  border-radius: 8px;
+  height: 44px;
+  overflow: hidden;
+  width: 44px;
+}
+
+.historySlip b,
+.historySlip small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historySlip small {
+  color: var(--muted);
+  font-size: 11px;
+  grid-column: 2;
+}
+
+.slipPreviewModal {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 22px;
+  box-shadow: 0 24px 70px rgba(18, 28, 52, 0.28);
+  display: grid;
+  gap: 14px;
+  max-height: calc(100vh - 32px);
+  max-width: min(960px, 96vw);
+  overflow: auto;
+  padding: 16px;
+}
+
+.slipPreviewHeader {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.slipPreviewHeader h3 {
+  margin: 0;
+}
+
+.slipGallery .emptyState {
+  grid-column: 1 / -1;
+}
+
 .liffShell {
   display: grid;
   gap: 10px;
@@ -1992,6 +2167,38 @@ tbody tr:hover {
 
   .mobileOnly {
     display: grid;
+  }
+
+  .slipGallery {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .slipGalleryBody {
+    padding: 10px;
+  }
+
+  .slipGalleryTop {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .slipGalleryTop h3 {
+    font-size: 14px;
+  }
+
+  .slipGalleryTop p,
+  .compactReason {
+    font-size: 11px;
+  }
+
+  .slipFacts,
+  .slipActions {
+    grid-template-columns: 1fr;
+  }
+
+  .slipPreviewModal {
+    border-radius: 16px;
+    padding: 10px;
   }
 
   .page {

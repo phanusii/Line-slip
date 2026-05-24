@@ -62,6 +62,8 @@ create table public.slip_submissions (
   mime_type text,
   image_hash text,
   slip_ref text,
+  duplicate_of_slip_id uuid references public.slip_submissions(id) on delete set null,
+  replaced_by_slip_id uuid references public.slip_submissions(id) on delete set null,
   amount_expected numeric(12, 2),
   amount_detected numeric(12, 2),
   transfer_datetime timestamptz,
@@ -118,6 +120,9 @@ create index slip_submissions_storage_path_idx on public.slip_submissions(storag
 create index slip_submissions_image_hash_idx on public.slip_submissions(image_hash) where image_hash is not null and metadata_deleted_at is null;
 create unique index slip_submissions_slip_ref_unique_idx on public.slip_submissions(slip_ref) where slip_ref is not null and metadata_deleted_at is null;
 create index slip_submissions_auto_check_status_idx on public.slip_submissions(event_id, auto_check_status) where metadata_deleted_at is null;
+create index slip_submissions_payment_target_created_idx on public.slip_submissions(payment_target_id, created_at desc) where metadata_deleted_at is null;
+create index slip_submissions_duplicate_of_idx on public.slip_submissions(duplicate_of_slip_id) where duplicate_of_slip_id is not null;
+create index slip_submissions_replaced_by_idx on public.slip_submissions(replaced_by_slip_id) where replaced_by_slip_id is not null;
 create index audit_logs_event_created_idx on public.audit_logs(event_id, created_at desc);
 
 create or replace function public.touch_updated_at()

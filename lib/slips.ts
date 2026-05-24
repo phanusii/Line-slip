@@ -39,6 +39,11 @@ export function hashImage(buffer: Buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
 
+function isMissingColumnError(error: unknown, column: string) {
+  const message = error instanceof Error ? error.message : JSON.stringify(error);
+  return message.includes(column) && message.includes("schema cache");
+}
+
 export async function readSlipQrRef(buffer: Buffer) {
   const data = await readSlipQrPayload(buffer);
   if (!data) return null;
@@ -104,33 +109,57 @@ export async function uploadSlipImage(input: UploadSlipInput) {
 
   const duplicate = qrDuplicate.data ?? imageDuplicate.data;
   if (duplicate) {
-    const duplicateInsert = await supabase
+    const duplicatePath = `events/${input.eventId}/duplicate_slip/${targetSegment}_${amount}_${datePart}_${imageHash.slice(0, 12)}.jpg`;
+    const uploadedDuplicate = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(duplicatePath, normalized, {
+        contentType: "image/jpeg",
+        upsert: false
+      });
+
+    if (uploadedDuplicate.error) {
+      throw uploadedDuplicate.error;
+    }
+
+    const duplicatePayload = {
+      event_id: input.eventId,
+      payment_target_id: input.paymentTargetId ?? null,
+      line_user_id: input.lineUserDbId ?? null,
+      line_message_id: input.lineMessageId ?? null,
+      storage_bucket: STORAGE_BUCKET,
+      storage_path: duplicatePath,
+      original_filename: `${input.personName ?? "unknown"}_${amount}_duplicate.jpg`,
+      file_size: normalized.byteLength,
+      mime_type: "image/jpeg",
+      image_hash: imageHash,
+      slip_ref: null,
+      duplicate_of_slip_id: duplicate.id,
+      amount_expected: input.amountExpected ?? null,
+      status: "duplicate_slip",
+      auto_check_status: "duplicate_slip",
+      auto_check_reasons: [
+        qrDuplicate.data ? "duplicate_slip_qr" : "duplicate_image_hash"
+      ],
+      auto_checked_at: now.toISOString(),
+      rejection_reason: `duplicate ${qrDuplicate.data ? "slip_ref" : "image_hash"} of slip ${duplicate.id}`
+    };
+    let duplicateInsert = await supabase
       .from("slip_submissions")
-      .insert({
-        event_id: input.eventId,
-        payment_target_id: input.paymentTargetId ?? null,
-        line_user_id: input.lineUserDbId ?? null,
-        line_message_id: input.lineMessageId ?? null,
-        storage_bucket: STORAGE_BUCKET,
-        storage_path: null,
-        original_filename: `${input.personName ?? "unknown"}_${amount}_duplicate.jpg`,
-        file_size: 0,
-        mime_type: "image/jpeg",
-        image_hash: imageHash,
-        slip_ref: null,
-        amount_expected: input.amountExpected ?? null,
-        status: "duplicate_slip",
-        auto_check_status: "duplicate_slip",
-        auto_check_reasons: [
-          qrDuplicate.data ? "duplicate_slip_qr" : "duplicate_image_hash"
-        ],
-        auto_checked_at: now.toISOString(),
-        rejection_reason: `duplicate ${qrDuplicate.data ? "slip_ref" : "image_hash"} of slip ${duplicate.id}`
-      })
+      .insert(duplicatePayload)
       .select("id,status")
       .single();
 
+    if (duplicateInsert.error && isMissingColumnError(duplicateInsert.error, "duplicate_of_slip_id")) {
+      const { duplicate_of_slip_id: _duplicateOfSlipId, ...fallbackPayload } = duplicatePayload;
+      duplicateInsert = await supabase
+        .from("slip_submissions")
+        .insert(fallbackPayload)
+        .select("id,status")
+        .single();
+    }
+
     if (duplicateInsert.error) {
+      await supabase.storage.from(STORAGE_BUCKET).remove([duplicatePath]);
       throw duplicateInsert.error;
     }
 
@@ -190,6 +219,23 @@ export async function uploadSlipImage(input: UploadSlipInput) {
   if (inserted.error) {
     await supabase.storage.from(STORAGE_BUCKET).remove([path]);
     throw inserted.error;
+  }
+
+  if (input.paymentTargetId) {
+    const replaced = await supabase
+      .from("slip_submissions")
+      .update({ replaced_by_slip_id: inserted.data.id })
+      .eq("payment_target_id", input.paymentTargetId)
+      .is("metadata_deleted_at", null)
+      .is("replaced_by_slip_id", null)
+      .neq("id", inserted.data.id)
+      .not("status", "in", "(verified,deleted)");
+
+    if (replaced.error && !isMissingColumnError(replaced.error, "replaced_by_slip_id")) {
+      await supabase.from("slip_submissions").delete().eq("id", inserted.data.id);
+      await supabase.storage.from(STORAGE_BUCKET).remove([path]);
+      throw replaced.error;
+    }
   }
 
   const autoCheck = await evaluateFreeAutoSlipCheck({

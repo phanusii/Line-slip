@@ -54,7 +54,6 @@ export async function POST(request: NextRequest) {
       .from("payment_targets")
       .select("id,event_id,display_name,amount_due,status,events(id,slug,is_open,archived_at)")
       .eq("selected_line_user_id", lineUser.id)
-      .neq("status", "verified")
       .neq("status", "deleted")
       .order("updated_at", { ascending: false })
       .limit(1);
@@ -70,6 +69,14 @@ export async function POST(request: NextRequest) {
         { error: "ยังไม่พบรายชื่อที่สร้าง QR ไว้ กรุณาเลือกงานและรายชื่อก่อนส่งสลิป" },
         { status: 409 }
       );
+    }
+
+    if (target.status === "verified") {
+      return NextResponse.json({
+        ok: true,
+        alreadyVerified: true,
+        message: "รายการนี้จ่ายเรียบร้อยแล้ว ไม่ต้องส่งสลิปเพิ่ม"
+      });
     }
 
     const event = Array.isArray(target.events) ? target.events[0] : target.events;
@@ -94,10 +101,10 @@ export async function POST(request: NextRequest) {
       slip,
       message:
         slip.status === "duplicate_slip"
-          ? "สลิปนี้เคยถูกส่งแล้ว ไม่สามารถใช้สลิปซ้ำได้"
+          ? "สลิปนี้เคยถูกส่งแล้ว ระบบบันทึกไว้เป็นสลิปซ้ำ ไม่ใช้ยืนยันการจ่าย"
           : slip.status === "verified"
             ? "ตรวจสลิปผ่านอัตโนมัติจากรูปสลิปแล้ว โปรดทราบว่านี่ไม่ใช่การยืนยันจากธนาคาร"
-          : "รับสลิปแล้ว ระบบบันทึกไฟล์เรียบร้อยแล้ว รอผู้ดูแลตรวจสอบ"
+          : "รับสลิปใหม่แล้ว ระบบจะใช้ใบล่าสุดให้แอดมินตรวจ"
     });
   } catch (error) {
     return NextResponse.json({ error: formatApiError(error) }, { status: 500 });

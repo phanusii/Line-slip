@@ -448,28 +448,36 @@ function PaymentAndSlipCard(props: {
   onUpload: () => void;
   onChangeName: () => void;
 }) {
+  const isVerified = props.result.target.status === "verified";
+
   return (
     <section className="liffCard qrCard">
-      <span className="badge ok">สร้าง QR แล้ว</span>
+      <span className="badge ok">{isVerified ? "จ่ายแล้ว" : "สร้าง QR แล้ว"}</span>
       <h2>{props.result.target.display_name}</h2>
       <p className="muted">
         {props.result.event.name} · ยอด {formatMoney(props.result.target.amount_due)} บาท
       </p>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={props.result.qr.data_url} alt="PromptPay QR Code" />
-      <p className="muted">ถ่ายหน้าจอ QR นี้หรือสแกนจ่าย จากนั้นอัปโหลดสลิปด้านล่าง</p>
-      <label className="uploadButton liffUpload">
-        เลือกรูปสลิป
-        <input
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          onChange={(event) => props.onFile(event.target.files?.[0] ?? null)}
-        />
-      </label>
-      {props.slipFile ? <p className="muted liffFileName">{props.slipFile.name}</p> : null}
-      <button className="btn primary liffPrimary" disabled={!props.slipFile || props.busy} onClick={props.onUpload}>
-        {props.busy ? "กำลังอัปโหลด" : "อัปโหลดสลิป"}
-      </button>
+      {isVerified ? (
+        <p className="muted">รายการนี้จ่ายเรียบร้อยแล้ว ไม่ต้องส่งสลิปเพิ่ม</p>
+      ) : (
+        <>
+          <p className="muted">ถ่ายหน้าจอ QR นี้หรือสแกนจ่าย จากนั้นอัปโหลดสลิปด้านล่าง</p>
+          <label className="uploadButton liffUpload">
+            เลือกรูปสลิป
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) => props.onFile(event.target.files?.[0] ?? null)}
+            />
+          </label>
+          {props.slipFile ? <p className="muted liffFileName">{props.slipFile.name}</p> : null}
+          <button className="btn primary liffPrimary" disabled={!props.slipFile || props.busy} onClick={props.onUpload}>
+            {props.busy ? "กำลังอัปโหลด" : "อัปโหลดสลิป"}
+          </button>
+        </>
+      )}
       <button className="btn subtle liffPrimary" onClick={props.onChangeName}>
         เปลี่ยนงาน/รายชื่อ
       </button>

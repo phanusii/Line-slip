@@ -80,10 +80,15 @@ type EventDetail = {
   }>;
   slips: Array<{
     id: string;
+    payment_target_id: string | null;
     status: string;
     file_size: number;
+    image_url: string | null;
     storage_path: string | null;
     file_deleted_at: string | null;
+    duplicate_of_slip_id: string | null;
+    replaced_by_slip_id: string | null;
+    rejection_reason: string | null;
     amount_expected: number | null;
     amount_detected: number | null;
     auto_check_status: string | null;
@@ -105,6 +110,8 @@ type EventDetail = {
 };
 
 type CleanupMode = "files" | "files_and_metadata" | "event";
+type SlipRow = EventDetail["slips"][number];
+type PreviewSlip = { url: string; slip: SlipRow };
 
 const exampleTargetsText = `สมชาย\t500
 สมหญิง\t500
@@ -169,6 +176,13 @@ function autoReasonText(reasons: string[] | null | undefined) {
   return reasons.map((reason) => autoReasonLabels[reason] ?? reason).join(", ");
 }
 
+function canReviewSlip(slip: SlipRow) {
+  return (
+    !slip.replaced_by_slip_id &&
+    !["verified", "rejected", "deleted", "duplicate_slip"].includes(slip.status)
+  );
+}
+
 type AuthUser = {
   email: string;
   role: "admin" | "viewer";
@@ -219,7 +233,7 @@ export default function Home() {
   const [activePage, setActivePage] = useState("overview");
   const [origin, setOrigin] = useState("");
   const [confirmName, setConfirmName] = useState("");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewSlip, setPreviewSlip] = useState<PreviewSlip | null>(null);
   const [createEventOpen, setCreateEventOpen] = useState(false);
   const [newEventName, setNewEventName] = useState("");
   const [newPromptpayId, setNewPromptpayId] = useState("");
@@ -499,12 +513,12 @@ export default function Home() {
     }
   }
 
-  async function openSlip(slipId: string) {
+  async function openSlip(slip: SlipRow) {
     const data = await api<{ signedUrl: string }>(
-      `/api/admin/slips/${slipId}/signed-url`,
+      `/api/admin/slips/${slip.id}/signed-url`,
       { method: "POST", body: "{}" }
     );
-    setPreviewUrl(data.signedUrl);
+    setPreviewSlip({ url: data.signedUrl, slip });
   }
 
   function authenticatedDownload(url: string) {
@@ -610,15 +624,48 @@ export default function Home() {
       if (targetFilter === "unpaid") return target.status !== "verified";
       return true;
     }) ?? [];
-  const slipRows =
-    detail?.slips.filter((slip) => {
-      if (slipFilter === "review") return slip.status === "manual_review";
-      if (slipFilter === "paid") return slip.status === "verified";
-      if (slipFilter === "problem") {
-        return ["amount_mismatch", "duplicate_slip", "rejected"].includes(slip.status);
-      }
-      return true;
-    }) ?? [];
+  const slipGroups = useMemo(() => {
+    const groups = new Map<string, SlipRow[]>();
+    for (const slip of detail?.slips ?? []) {
+      const key = slip.payment_target_id ?? `slip:${slip.id}`;
+      groups.set(key, [...(groups.get(key) ?? []), slip]);
+    }
+
+    return Array.from(groups.entries())
+      .map(([key, slips]) => {
+        const sorted = slips.sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        const primary =
+          sorted.find((slip) => !slip.replaced_by_slip_id && slip.status !== "duplicate_slip") ??
+          sorted[0];
+        const history = sorted.filter((slip) => slip.id !== primary.id);
+        const hasProblem = sorted.some((slip) =>
+          ["amount_mismatch", "duplicate_slip", "rejected"].includes(slip.status)
+        );
+        const hasDuplicate = sorted.some((slip) => slip.status === "duplicate_slip");
+        const hasHistory =
+          sorted.length > 1 || sorted.some((slip) => Boolean(slip.replaced_by_slip_id));
+
+        return {
+          key,
+          primary,
+          history,
+          count: sorted.length,
+          hasProblem,
+          hasDuplicate,
+          hasHistory
+        };
+      })
+      .filter((group) => {
+        if (slipFilter === "review") return group.primary.status === "manual_review";
+        if (slipFilter === "paid") return group.primary.status === "verified";
+        if (slipFilter === "duplicate") return group.hasDuplicate;
+        if (slipFilter === "history") return group.hasHistory;
+        if (slipFilter === "problem") return group.hasProblem;
+        return true;
+      });
+  }, [detail?.slips, slipFilter]);
 
   return (
     <div className={adminUser ? "page adminAppPage" : "page"}>
@@ -1078,7 +1125,7 @@ export default function Home() {
               <div className="panelHeader">
                 <div>
                   <h2>ไฟล์สลิป</h2>
-                  <p className="muted">เปิดดูผ่าน signed URL และจัดการข้อมูลหลังปิดงาน</p>
+                  <p className="muted">ดูรูปสลิปแบบ gallery รวมสลิปล่าสุด สลิปซ้ำ และประวัติของแต่ละรายชื่อ</p>
                 </div>
                 <div className="actions">
                   <button
@@ -1109,6 +1156,8 @@ export default function Home() {
                   ["all", "ทั้งหมด"],
                   ["review", "รอตรวจ"],
                   ["paid", "จ่ายแล้ว"],
+                  ["duplicate", "สลิปซ้ำ"],
+                  ["history", "ประวัติ/ถูกแทนที่"],
                   ["problem", "มีปัญหา"]
                 ].map(([value, label]) => (
                   <button
@@ -1120,139 +1169,122 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              <div className="tableWrap desktopOnly">
-                <table className="dataTable compactTable">
-                  <thead>
-                    <tr>
-                      <th>ชื่อ</th>
-                      <th>สถานะ</th>
-                      <th>ยอด</th>
-                      <th>ตรวจอัตโนมัติ</th>
-                      <th>ขนาด</th>
-                      <th>วันที่</th>
-                      <th>จัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {slipRows.map((slip) => (
-                      <tr key={slip.id}>
-                        <td>{slip.payment_targets?.display_name ?? "-"}</td>
-                        <td>
-                          <span className={slip.status === "verified" ? "badge ok" : "badge"}>
-                            {statusLabels[slip.status] ?? slip.status}
-                          </span>
-                        </td>
-                        <td>{formatMoney(slip.amount_expected)}</td>
-                        <td>
-                          <span className={slip.auto_check_status === "passed" ? "badge ok" : "badge"}>
-                            {slip.auto_check_status ?? "-"}
-                          </span>
-                          <p className="muted compactReason">
-                            OCR: {slip.amount_detected !== null ? formatMoney(slip.amount_detected) : "-"}
-                          </p>
-                          <p className="muted compactReason">{autoReasonText(slip.auto_check_reasons)}</p>
-                        </td>
-                        <td>{formatBytes(slip.file_size)}</td>
-                        <td>{new Date(slip.created_at).toLocaleString("th-TH")}</td>
-                        <td>
-                          <div className="actions">
-                            <button
-                              className="btn subtle"
-                              disabled={!slip.storage_path || Boolean(slip.file_deleted_at)}
-                              onClick={() => openSlip(slip.id)}
-                            >
-                              <Eye size={15} />
-                              เปิด
-                            </button>
-                            <button
-                              className="btn subtle"
-                              disabled={!slip.storage_path || Boolean(slip.file_deleted_at)}
-                              onClick={() => authenticatedDownload(`/api/admin/slips/${slip.id}/download`)}
-                            >
-                              <Download size={15} />
-                              โหลด
-                            </button>
-                            <button
-                              className="btn subtle"
-                              disabled={busy || slip.status === "verified"}
-                              onClick={() => updateSlipStatus(slip.id, "verified")}
-                            >
-                              อนุมัติ
-                            </button>
-                            <button
-                              className="btn danger"
-                              disabled={busy || slip.status === "rejected"}
-                              onClick={() => updateSlipStatus(slip.id, "rejected")}
-                            >
-                              ปฏิเสธ
-                            </button>
+              <div className="slipGallery">
+                {slipGroups.map((group) => {
+                  const slip = group.primary;
+                  const canOpen = Boolean(slip.storage_path && !slip.file_deleted_at);
+                  return (
+                    <article className="slipGalleryCard" key={group.key}>
+                      <button
+                        className="slipThumb"
+                        disabled={!canOpen}
+                        onClick={() => openSlip(slip)}
+                        aria-label={`เปิดสลิปของ ${slip.payment_targets?.display_name ?? "ไม่ระบุชื่อ"}`}
+                      >
+                        {slip.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={slip.image_url} alt="รูปสลิป" />
+                        ) : (
+                          <span>{slip.file_deleted_at ? "ลบไฟล์แล้ว" : "ไม่มีรูป"}</span>
+                        )}
+                      </button>
+                      <div className="slipGalleryBody">
+                        <div className="slipGalleryTop">
+                          <div>
+                            <h3>{slip.payment_targets?.display_name ?? "-"}</h3>
+                            <p>{new Date(slip.created_at).toLocaleString("th-TH")}</p>
                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="mobileCardList mobileOnly">
-                {slipRows.map((slip) => (
-                  <article className="mobileRecordCard" key={slip.id}>
-                    <div className="mobileRecordHeader">
-                      <div>
-                        <h3>{slip.payment_targets?.display_name ?? "-"}</h3>
-                        <p>{new Date(slip.created_at).toLocaleString("th-TH")}</p>
+                          <span className={slip.status === "verified" ? "badge ok" : "badge"}>
+                            {slip.replaced_by_slip_id
+                              ? "ถูกแทนที่"
+                              : statusLabels[slip.status] ?? slip.status}
+                          </span>
+                        </div>
+                        <div className="slipFacts">
+                          <div>
+                            <span>ยอด</span>
+                            <strong>{formatMoney(slip.amount_expected)}</strong>
+                          </div>
+                          <div>
+                            <span>OCR</span>
+                            <strong>
+                              {slip.amount_detected !== null ? formatMoney(slip.amount_detected) : "-"}
+                            </strong>
+                          </div>
+                          <div>
+                            <span>ไฟล์</span>
+                            <strong>{formatBytes(slip.file_size)}</strong>
+                          </div>
+                        </div>
+                        <p className="muted compactReason">
+                          {slip.auto_check_status ?? "-"} · {autoReasonText(slip.auto_check_reasons)}
+                        </p>
+                        {group.count > 1 ? (
+                          <details className="slipHistory">
+                            <summary>มี {group.count} สลิปในกลุ่มนี้</summary>
+                            <div>
+                              {group.history.map((historySlip) => (
+                                <button
+                                  className="historySlip"
+                                  key={historySlip.id}
+                                  disabled={!historySlip.storage_path || Boolean(historySlip.file_deleted_at)}
+                                  onClick={() => openSlip(historySlip)}
+                                >
+                                  {historySlip.image_url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={historySlip.image_url} alt="ประวัติสลิป" />
+                                  ) : (
+                                    <span />
+                                  )}
+                                  <b>
+                                    {historySlip.replaced_by_slip_id
+                                      ? "ถูกแทนที่"
+                                      : statusLabels[historySlip.status] ?? historySlip.status}
+                                  </b>
+                                  <small>{new Date(historySlip.created_at).toLocaleString("th-TH")}</small>
+                                </button>
+                              ))}
+                            </div>
+                          </details>
+                        ) : null}
+                        <div className="slipActions">
+                          <button className="btn subtle" disabled={!canOpen} onClick={() => openSlip(slip)}>
+                            <Eye size={15} />
+                            เปิด
+                          </button>
+                          <button
+                            className="btn subtle"
+                            disabled={!canOpen}
+                            onClick={() => authenticatedDownload(`/api/admin/slips/${slip.id}/download`)}
+                          >
+                            <Download size={15} />
+                            โหลด
+                          </button>
+                          <button
+                            className="btn subtle"
+                            disabled={busy || !canReviewSlip(slip)}
+                            onClick={() => updateSlipStatus(slip.id, "verified")}
+                          >
+                            อนุมัติ
+                          </button>
+                          <button
+                            className="btn danger"
+                            disabled={busy || !canReviewSlip(slip)}
+                            onClick={() => updateSlipStatus(slip.id, "rejected")}
+                          >
+                            ปฏิเสธ
+                          </button>
+                        </div>
                       </div>
-                      <span className={slip.status === "verified" ? "badge ok" : "badge"}>
-                        {statusLabels[slip.status] ?? slip.status}
-                      </span>
-                    </div>
-                    <div className="mobileMetricGrid">
-                      <div>
-                        <span>ยอด</span>
-                        <strong>{formatMoney(slip.amount_expected)}</strong>
-                      </div>
-                      <div>
-                        <span>ขนาด</span>
-                        <strong>{formatBytes(slip.file_size)}</strong>
-                      </div>
-                      <div className="wideMetric">
-                        <span>ตรวจอัตโนมัติ</span>
-                        <strong>{slip.auto_check_status ?? "-"}</strong>
-                        <p>OCR: {slip.amount_detected !== null ? formatMoney(slip.amount_detected) : "-"}</p>
-                        <p>{autoReasonText(slip.auto_check_reasons)}</p>
-                      </div>
-                    </div>
-                    <div className="mobileActionGrid">
-                      <button
-                        className="btn subtle"
-                        disabled={!slip.storage_path || Boolean(slip.file_deleted_at)}
-                        onClick={() => openSlip(slip.id)}
-                      >
-                        เปิด
-                      </button>
-                      <button
-                        className="btn subtle"
-                        disabled={!slip.storage_path || Boolean(slip.file_deleted_at)}
-                        onClick={() => authenticatedDownload(`/api/admin/slips/${slip.id}/download`)}
-                      >
-                        โหลด
-                      </button>
-                      <button
-                        className="btn subtle"
-                        disabled={busy || slip.status === "verified"}
-                        onClick={() => updateSlipStatus(slip.id, "verified")}
-                      >
-                        อนุมัติ
-                      </button>
-                      <button
-                        className="btn danger"
-                        disabled={busy || slip.status === "rejected"}
-                        onClick={() => updateSlipStatus(slip.id, "rejected")}
-                      >
-                        ปฏิเสธ
-                      </button>
-                    </div>
-                  </article>
-                ))}
+                    </article>
+                  );
+                })}
+                {!slipGroups.length ? (
+                  <div className="emptyState">
+                    <strong>ยังไม่มีสลิปในตัวกรองนี้</strong>
+                    <p>ลองเปลี่ยนตัวกรองหรือเลือกงานอื่นเพื่อดูสลิป</p>
+                  </div>
+                ) : null}
               </div>
             </div>
           </section>
@@ -1639,10 +1671,47 @@ export default function Home() {
         </div>
       ) : null}
 
-      {previewUrl ? (
-        <div className="modalBackdrop" onClick={() => setPreviewUrl(null)}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="preview" src={previewUrl} alt="ตัวอย่างสลิป" />
+      {previewSlip ? (
+        <div className="modalBackdrop" onClick={() => setPreviewSlip(null)}>
+          <div className="slipPreviewModal" onClick={(event) => event.stopPropagation()}>
+            <div className="slipPreviewHeader">
+              <div>
+                <h3>{previewSlip.slip.payment_targets?.display_name ?? "สลิป"}</h3>
+                <p className="muted">
+                  {formatMoney(previewSlip.slip.amount_expected)} บาท ·{" "}
+                  {statusLabels[previewSlip.slip.status] ?? previewSlip.slip.status}
+                </p>
+              </div>
+              <button className="iconButton" onClick={() => setPreviewSlip(null)} aria-label="ปิดตัวอย่างสลิป">
+                ปิด
+              </button>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img className="preview" src={previewSlip.url} alt="ตัวอย่างสลิป" />
+            <div className="actions modalActions">
+              <button
+                className="btn subtle"
+                onClick={() => authenticatedDownload(`/api/admin/slips/${previewSlip.slip.id}/download`)}
+              >
+                <Download size={15} />
+                ดาวน์โหลด
+              </button>
+              <button
+                className="btn subtle"
+                disabled={busy || !canReviewSlip(previewSlip.slip)}
+                onClick={() => updateSlipStatus(previewSlip.slip.id, "verified")}
+              >
+                อนุมัติ
+              </button>
+              <button
+                className="btn danger"
+                disabled={busy || !canReviewSlip(previewSlip.slip)}
+                onClick={() => updateSlipStatus(previewSlip.slip.id, "rejected")}
+              >
+                ปฏิเสธ
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
