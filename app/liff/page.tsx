@@ -89,7 +89,7 @@ type BootstrapResponse = {
 const eventsCacheKey = "line-slip:liff-events:v1";
 
 function bootstrapCacheKey(mode: LiffMode) {
-  return `line-slip:liff-bootstrap:${mode}:v2`;
+  return `line-slip:liff-bootstrap:${mode}:v3`;
 }
 
 function targetsCacheKey(eventId: string) {
@@ -406,13 +406,16 @@ export default function LiffPaymentPage() {
       data.events.forEach((event) => {
         if (event.targets.length) writeTargetsCache(event.id, event.targets);
       });
-      const preferredEventId = data.selection?.event.id ?? data.events[0]?.id ?? "";
+      const preferredEventId =
+        data.page === "slip"
+          ? data.selection?.event.id ?? data.events[0]?.id ?? ""
+          : data.events[0]?.id ?? "";
       setSelectedEventId(preferredEventId);
     }
-    if (data.selection) {
+    if (data.page === "slip" && data.selection) {
       setResult(data.selection);
       setSelectedTargetId(data.selection.target.id);
-    } else if (data.page === "pay") {
+    } else if (data.page === "pay" || data.page === "me") {
       setResult(null);
       setSelectedTargetId("");
     }

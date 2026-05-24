@@ -192,9 +192,8 @@ async function handleBootstrap(request: NextRequest, input: { accessToken?: stri
 
   if (lineUserError) throw lineUserError;
 
-  const selectionPromise = getActiveSelection(supabase, lineUser.id);
   const [selection, pageData] = await Promise.all([
-    selectionPromise,
+    page === "slip" ? getActiveSelection(supabase, lineUser.id) : Promise.resolve(null),
     page === "me" ? getPayments(supabase, lineUser.id) : getOpenEventsWithFirstTargets(supabase)
   ]);
 
