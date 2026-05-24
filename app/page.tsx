@@ -760,7 +760,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="grid" hidden={activePage !== "overview" && activePage !== "storage"}>
+        <section className="grid" hidden={activePage !== "overview"}>
           <div className="panel stat accentReview">
             <div className="panelHeader">
               <h2>คิวสลิปรอตรวจ</h2>
