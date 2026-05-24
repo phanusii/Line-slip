@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/phanuphan/Downloads/Line-slip && CHANGED=$(git status --porcelain | grep -v '^??' | wc -l | tr -d ' ') && if [ \"$CHANGED\" -gt \"0\" ]; then git add -u && FILES=$(git diff --cached --name-only | head -3 | tr '\\n' ',' | sed 's/,$//') && git commit -m \"auto: ${FILES}\" --no-verify 2>/dev/null || true && git push 2>/dev/null || true; fi",
+            "timeout": 60,
+            "statusMessage": "กำลัง commit และ push...",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
