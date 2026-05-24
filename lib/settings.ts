@@ -20,11 +20,29 @@ export const SETTING_KEYS = [
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type SettingsMap = Partial<Record<SettingKey, string>>;
 
+/**
+ * env var fallbacks — ถ้า admin ตั้ง env var บน Vercel แต่ยังไม่บันทึกใน settings table
+ * ระบบจะ fallback ให้อัตโนมัติ (DB value มีสิทธิ์สูงกว่า)
+ */
+const ENV_FALLBACKS: Partial<Record<SettingKey, string | undefined>> = {
+  telegram_bot_token: process.env.TELEGRAM_BOT_TOKEN,
+  telegram_chat_id: process.env.TELEGRAM_CHAT_ID,
+  discord_webhook_url: process.env.DISCORD_WEBHOOK_URL
+};
+
 export async function getSettings(keys: readonly SettingKey[] = SETTING_KEYS) {
   const supabase = createServiceClient();
   const { data, error } = await supabase.from("settings").select("key,value").in("key", keys);
   if (error) throw error;
-  return Object.fromEntries((data ?? []).map((row) => [row.key, row.value])) as SettingsMap;
+  const dbSettings = Object.fromEntries((data ?? []).map((row) => [row.key, row.value])) as SettingsMap;
+  // env var fallbacks: ใช้เฉพาะ key ที่ขอและ DB ยังไม่มี
+  for (const key of keys) {
+    const envValue = ENV_FALLBACKS[key];
+    if (envValue && !dbSettings[key]) {
+      dbSettings[key] = envValue;
+    }
+  }
+  return dbSettings;
 }
 
 export function getLinePushPolicy(settings: SettingsMap) {

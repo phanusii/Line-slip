@@ -78,7 +78,13 @@ export async function verifyExternalReviewToken(input: {
 export async function notifyAdminSlipReview(slipId: string) {
   const settings = await getSettings();
   const channel = getAdminReviewChannel(settings);
-  if (channel === "dashboard_only") return;
+  if (channel === "dashboard_only") {
+    console.warn(
+      "[admin-review] channel=dashboard_only — ไม่ส่งแจ้งเตือน" +
+      " (ตรวจสอบ: telegram_bot_token และ telegram_chat_id ใน Admin Settings หรือ env vars TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)"
+    );
+    return;
+  }
 
   const supabase = createServiceClient();
   const { data: slip, error } = await supabase
@@ -87,7 +93,10 @@ export async function notifyAdminSlipReview(slipId: string) {
     .eq("id", slipId)
     .single();
   if (error) throw error;
-  if (slip.status !== "manual_review") return;
+  if (slip.status !== "manual_review") {
+    console.log(`[admin-review] slipId=${slipId} status=${slip.status} — ข้ามการแจ้งเตือน (ไม่ใช่ manual_review)`);
+    return;
+  }
 
   const { data: target } = slip.payment_target_id
     ? await supabase
