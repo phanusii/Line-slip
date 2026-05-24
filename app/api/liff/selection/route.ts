@@ -99,7 +99,41 @@ export async function POST(request: NextRequest) {
 
     if (cleared.error) throw cleared.error;
 
-    const amount = Number(target.amount_due);
+    let amount = Number(target.amount_due);
+
+    // กำหนดเศษทศนิยม: ถ้ายอดเป็นจำนวนเต็ม (เช่น 500) และมีคนอื่นในงานนี้ที่มียอดเดียวกัน
+    // → ให้คนนี้ได้ .01, .02, ... ตามลำดับที่กดเลือก (first-come-first-served)
+    if (Number.isInteger(amount) && amount > 0) {
+      const [{ count: sameBaseCount }, { count: suffixUsedCount }] = await Promise.all([
+        // นับคนอื่นที่ยังอยู่ที่ยอดเดิม (ยังไม่ได้รับ suffix)
+        supabase
+          .from("payment_targets")
+          .select("id", { count: "exact", head: true })
+          .eq("event_id", target.event_id)
+          .eq("amount_due", amount)
+          .neq("id", target.id)
+          .neq("status", "deleted"),
+        // นับ suffix ที่ถูกใช้ไปแล้วในช่วง amount → amount+1
+        supabase
+          .from("payment_targets")
+          .select("id", { count: "exact", head: true })
+          .eq("event_id", target.event_id)
+          .neq("id", target.id)
+          .gt("amount_due", amount)
+          .lt("amount_due", amount + 1)
+          .neq("status", "deleted")
+      ]);
+
+      if ((sameBaseCount ?? 0) > 0) {
+        const nextSuffix = ((suffixUsedCount ?? 0) + 1) / 100;
+        amount = amount + nextSuffix;
+        await supabase
+          .from("payment_targets")
+          .update({ amount_due: amount })
+          .eq("id", target.id);
+      }
+    }
+
     const payload = buildPromptPayPayload(event.promptpay_id, amount);
     const qrDataUrl = await QRCode.toDataURL(payload, {
       margin: 1,

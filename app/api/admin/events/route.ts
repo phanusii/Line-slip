@@ -93,22 +93,12 @@ function money(value: number) {
 
 function applyUniqueAmountSuffix(
   targets: NormalizedTarget[],
-  defaultAmount: number,
-  enabled: boolean
+  _defaultAmount: number,
+  _enabled: boolean
 ) {
-  if (!enabled || !Number.isFinite(defaultAmount) || targets.length > 99) return targets;
-
-  return targets.map((target, index) => {
-    const usesDefaultAmount =
-      target.amount_from_default || money(target.amount_due) === money(defaultAmount);
-
-    if (!usesDefaultAmount) return target;
-
-    return {
-      ...target,
-      amount_due: money(defaultAmount + (index + 1) / 100)
-    };
-  });
+  // เศษทศนิยมถูกกำหนดตอนผู้ใช้กดเลือกชื่อใน LIFF (ลำดับจริงตามเวลาที่กด)
+  // ไม่ใช่ตอนสร้างงาน — ดู /api/liff/selection/route.ts
+  return targets;
 }
 
 export async function GET(request: NextRequest) {

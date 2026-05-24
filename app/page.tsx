@@ -1739,7 +1739,8 @@ export default function Home() {
               <h3>เพิ่มงานเก็บเงิน</h3>
               <p className="muted">
                 วางรายชื่อจาก Google Sheets หรือ Excel ได้เลย ถ้ายอดเท่ากันทุกคนให้กรอกยอดกลาง
-                แล้วระบบจะเติมเศษสตางค์เฉพาะรายชื่อ เช่น 500.01, 500.02
+                ระบบจะเติมเศษสตางค์ให้อัตโนมัติตอนแต่ละคนกดเลือกชื่อใน LIFF
+                คนแรกที่กดได้ .01 คนที่สองได้ .02 และต่อ ๆ ไป
               </p>
             </div>
 
@@ -1778,7 +1779,7 @@ export default function Home() {
                 checked={newUniqueAmountSuffix}
                 onChange={(event) => setNewUniqueAmountSuffix(event.target.checked)}
               />
-              <span>เติมเศษสตางค์เฉพาะรายชื่อจากยอดกลาง</span>
+              <span>เติมเศษสตางค์เมื่อกดเลือกใน LIFF (.01, .02, … ตามลำดับที่กด)</span>
             </label>
 
             <label className="field">
