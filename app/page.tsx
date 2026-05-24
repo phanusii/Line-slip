@@ -297,6 +297,19 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [adminUser, notifyEnabled, lastPendingCount]);
 
+  // Auto-refresh event detail ทุก 30 วิ เพื่อให้เห็นสลิปใหม่โดยไม่ต้องกดรีเฟรชเอง
+  useEffect(() => {
+    if (!adminUser || !selectedEventId) return;
+    const timer = window.setInterval(async () => {
+      try {
+        setDetail(await api<EventDetail>(`/api/admin/events/${selectedEventId}`));
+      } catch {
+        // ไม่แสดง error สำหรับ background refresh
+      }
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [adminUser, selectedEventId]);
+
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === selectedEventId) ?? events[0],
     [events, selectedEventId]

@@ -1,4 +1,4 @@
-import { after, NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { formatApiError } from "@/lib/api-error";
 import { notifyAdminSlipReview } from "@/lib/admin-review";
 import { getLineProfile, verifyLineAccessToken } from "@/lib/liff";
@@ -98,11 +98,11 @@ export async function POST(request: NextRequest) {
       notifyAdmin: false
     });
 
+    // แจ้งเตือนแอดมินแบบ synchronous (ก่อน return) — after() ไม่น่าเชื่อถือบน Vercel Hobby
+    // เพราะ Lambda ถูก terminate หลัง response sent ทำให้ callback ไม่ทำงาน
     if (slip.id && slip.status === "manual_review") {
-      after(async () => {
-        await notifyAdminSlipReview(slip.id!).catch((notifyError) => {
-          console.error("slip review notification failed", notifyError);
-        });
+      await notifyAdminSlipReview(slip.id).catch((notifyError) => {
+        console.error("slip review notification failed", notifyError);
       });
     }
 
