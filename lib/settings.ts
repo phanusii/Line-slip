@@ -6,6 +6,7 @@ export const SETTING_KEYS = [
   "admin_review_channel",
   "telegram_bot_token",
   "telegram_chat_id",
+  "telegram_webhook_secret",
   "discord_webhook_url",
   "admin_review_token_secret",
   "admin_review_token_ttl_hours",

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { appBaseUrl } from "@/lib/line";
 import { getAdminReviewChannel, getSettings, SettingsMap } from "@/lib/settings";
 import { createServiceClient } from "@/lib/supabase/server";
+import { sendTelegramSlipReview } from "@/lib/telegram";
 
 type ReviewAction = "verified" | "rejected";
 
@@ -106,6 +107,7 @@ export async function notifyAdminSlipReview(slipId: string) {
 
   const verifiedUrl = externalReviewUrl(slipId, "verified", settings);
   const rejectedUrl = externalReviewUrl(slipId, "rejected", settings);
+  const dashboardUrl = `${appBaseUrl()}/`;
   const eventRow = Array.isArray(target?.events) ? target?.events[0] : target?.events;
   const eventName = eventRow?.name ?? "ไม่พบชื่องาน";
   const displayName = target?.display_name ?? "ไม่พบชื่อ";
@@ -120,7 +122,7 @@ export async function notifyAdminSlipReview(slipId: string) {
 
   try {
     if (channel === "telegram") {
-      await sendTelegramReview(settings, message, imageUrl, verifiedUrl, rejectedUrl);
+      await sendTelegramSlipReview({ settings, slipId, text: message, imageUrl, dashboardUrl });
     } else {
       await sendDiscordReview(settings, message, imageUrl, verifiedUrl, rejectedUrl);
     }
@@ -152,50 +154,6 @@ export async function notifyAdminSlipReview(slipId: string) {
 function externalReviewUrl(slipId: string, action: ReviewAction, settings: SettingsMap) {
   const token = signExternalReviewToken({ slipId, action, settings });
   return `${appBaseUrl()}/api/admin/slips/${slipId}/external-review?action=${action}&token=${encodeURIComponent(token)}`;
-}
-
-async function sendTelegramReview(
-  settings: SettingsMap,
-  text: string,
-  imageUrl: string | null,
-  verifiedUrl: string,
-  rejectedUrl: string
-) {
-  if (!settings.telegram_bot_token || !settings.telegram_chat_id) {
-    throw new Error("ยังไม่ได้ตั้งค่า Telegram bot token/chat id");
-  }
-
-  const endpoint = imageUrl ? "sendPhoto" : "sendMessage";
-  const payload = imageUrl
-    ? {
-        chat_id: settings.telegram_chat_id,
-        photo: imageUrl,
-        caption: text,
-        reply_markup: {
-          inline_keyboard: [[
-            { text: "อนุมัติ", url: verifiedUrl },
-            { text: "ปฏิเสธ", url: rejectedUrl }
-          ]]
-        }
-      }
-    : {
-        chat_id: settings.telegram_chat_id,
-        text,
-        reply_markup: {
-          inline_keyboard: [[
-            { text: "อนุมัติ", url: verifiedUrl },
-            { text: "ปฏิเสธ", url: rejectedUrl }
-          ]]
-        }
-      };
-
-  const response = await fetch(`https://api.telegram.org/bot${settings.telegram_bot_token}/${endpoint}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) throw new Error(await response.text());
 }
 
 async function sendDiscordReview(

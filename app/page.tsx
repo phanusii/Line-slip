@@ -69,6 +69,21 @@ type LineQuota = {
   error?: string;
 };
 
+type TelegramConnect = {
+  bot?: { username?: string; first_name?: string };
+  startUrl?: string;
+  webhookUrl?: string;
+  chats?: Array<{
+    id: string;
+    chat_id: string;
+    chat_title: string | null;
+    chat_type: string | null;
+    enabled: boolean;
+    last_seen_at: string;
+  }>;
+  hasBotToken?: boolean;
+};
+
 type EventDetail = {
   event: { id: string; name: string; slug: string; expected_total: number };
   targets: Array<{
@@ -249,6 +264,7 @@ export default function Home() {
   const [autoVerifyOcrEnabled, setAutoVerifyOcrEnabled] = useState(false);
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramChatId, setTelegramChatId] = useState("");
+  const [telegramConnect, setTelegramConnect] = useState<TelegramConnect | null>(null);
   const [discordWebhookUrl, setDiscordWebhookUrl] = useState("");
   const [adminReviewTokenSecret, setAdminReviewTokenSecret] = useState("");
   const [adminReviewTokenTtlHours, setAdminReviewTokenTtlHours] = useState("24");
@@ -342,6 +358,7 @@ export default function Home() {
       setDiscordWebhookUrl(settings.discord_webhook_url ?? "");
       setAdminReviewTokenSecret(settings.admin_review_token_secret ?? "");
       setAdminReviewTokenTtlHours(settings.admin_review_token_ttl_hours ?? "24");
+      void loadTelegramConnect();
       void loadLineQuota();
     } catch {
       // non-critical
@@ -370,6 +387,7 @@ export default function Home() {
         })
       });
       setContactUrlSaved(true);
+      await loadTelegramConnect();
       setTimeout(() => setContactUrlSaved(false), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -383,6 +401,45 @@ export default function Home() {
       setLineQuota(await api<LineQuota>("/api/admin/line/quota"));
     } catch {
       // non-critical
+    }
+  }
+
+  async function loadTelegramConnect() {
+    try {
+      setTelegramConnect(await api<TelegramConnect>("/api/admin/telegram/connect"));
+    } catch {
+      // non-critical
+    }
+  }
+
+  async function createTelegramConnectLink() {
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await api<TelegramConnect>("/api/admin/telegram/connect", {
+        method: "POST",
+        body: "{}"
+      });
+      setTelegramConnect(data);
+      setToast("สร้างลิงก์เชื่อม Telegram แล้ว เปิดลิงก์และกด Start ในบอท");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function testTelegram() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/api/admin/telegram/test", { method: "POST", body: "{}" });
+      setToast("ส่งข้อความทดสอบ Telegram แล้ว");
+      await loadTelegramConnect();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1440,7 +1497,7 @@ export default function Home() {
                 <input
                   value={telegramChatId}
                   onChange={(e) => setTelegramChatId(e.target.value)}
-                  placeholder="-100xxxxxxxxxx"
+                  placeholder="เชื่อมจากปุ่มด้านล่าง หรือใส่ -100xxxxxxxxxx"
                 />
               </label>
               <label className="field">
@@ -1481,6 +1538,52 @@ export default function Home() {
                       : `เหลือ ${lineQuota.remaining} / ${lineQuota.limit}`}
                 </span>
               ) : null}
+            </div>
+            <div className="hintBox" style={{ marginTop: "1rem" }}>
+              <strong>Telegram Admin Bot</strong>
+              <p>
+                บันทึก Bot Token แล้วกดเชื่อม Telegram ระบบจะตั้ง webhook ให้เอง จากนั้นเปิดบอทและกด Start
+                เพื่อผูกแชทนี้กับหลังบ้าน
+              </p>
+              <div className="actions">
+                <button
+                  className="btn primary"
+                  disabled={!adminUser || adminUser.role !== "admin" || busy || !telegramBotToken}
+                  onClick={createTelegramConnectLink}
+                >
+                  เชื่อม Telegram
+                </button>
+                <button
+                  className="btn subtle"
+                  disabled={!adminUser || adminUser.role !== "admin" || busy}
+                  onClick={testTelegram}
+                >
+                  ทดสอบ Telegram
+                </button>
+                {telegramConnect?.startUrl ? (
+                  <a className="btn subtle" href={telegramConnect.startUrl} target="_blank" rel="noreferrer">
+                    เปิดบอท
+                  </a>
+                ) : null}
+              </div>
+              {telegramConnect?.bot?.username ? (
+                <p className="muted">Bot: @{telegramConnect.bot.username}</p>
+              ) : null}
+              {telegramConnect?.webhookUrl ? (
+                <p className="muted">Webhook: {telegramConnect.webhookUrl}</p>
+              ) : null}
+              {telegramConnect?.chats?.length ? (
+                <div className="miniList">
+                  {telegramConnect.chats.map((chat) => (
+                    <span className="badge neutral" key={chat.id}>
+                      {chat.chat_title || chat.chat_id}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">ยังไม่มี Telegram chat ที่เชื่อมแล้ว</p>
+              )}
+              <p className="muted">คำสั่งใน Telegram: /events, /targets &lt;slug&gt;, /pending, /slips</p>
             </div>
           </div>
 

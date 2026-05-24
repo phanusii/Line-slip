@@ -580,6 +580,17 @@ tbody tr:hover {
   color: var(--danger);
 }
 
+.badge.neutral {
+  background: #f4f6fb;
+  color: #5b657c;
+}
+
+.miniList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .detailGrid {
   display: grid;
   gap: 22px;

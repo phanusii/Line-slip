@@ -101,6 +101,29 @@ create table public.audit_logs (
   created_at timestamptz not null default now()
 );
 
+create table public.telegram_admin_chats (
+  id uuid primary key default gen_random_uuid(),
+  chat_id text not null unique,
+  chat_type text,
+  chat_title text,
+  admin_email text,
+  enabled boolean not null default true,
+  connected_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now()
+);
+
+create table public.telegram_review_actions (
+  id uuid primary key default gen_random_uuid(),
+  slip_id uuid not null references public.slip_submissions(id) on delete cascade,
+  action text not null check (action in ('verified', 'rejected')),
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  used_chat_id text,
+  used_by text,
+  created_at timestamptz not null default now()
+);
+
 alter table public.payment_targets
   add constraint payment_targets_paid_slip_fk
   foreign key (paid_slip_submission_id)
@@ -125,6 +148,9 @@ create index slip_submissions_payment_target_created_idx on public.slip_submissi
 create index slip_submissions_duplicate_of_idx on public.slip_submissions(duplicate_of_slip_id) where duplicate_of_slip_id is not null;
 create index slip_submissions_replaced_by_idx on public.slip_submissions(replaced_by_slip_id) where replaced_by_slip_id is not null;
 create index audit_logs_event_created_idx on public.audit_logs(event_id, created_at desc);
+create index telegram_admin_chats_enabled_idx on public.telegram_admin_chats(enabled, last_seen_at desc);
+create index telegram_review_actions_slip_idx on public.telegram_review_actions(slip_id, created_at desc);
+create index telegram_review_actions_active_idx on public.telegram_review_actions(token_hash, expires_at) where used_at is null;
 
 create or replace function public.touch_updated_at()
 returns trigger
@@ -161,6 +187,8 @@ alter table public.line_users enable row level security;
 alter table public.slip_submissions enable row level security;
 alter table public.admin_users enable row level security;
 alter table public.audit_logs enable row level security;
+alter table public.telegram_admin_chats enable row level security;
+alter table public.telegram_review_actions enable row level security;
 
 create policy "admin service access events"
 on public.events for all
@@ -192,6 +220,16 @@ on public.audit_logs for all
 using (auth.role() = 'service_role')
 with check (auth.role() = 'service_role');
 
+create policy "admin service access telegram chats"
+on public.telegram_admin_chats for all
+using (auth.role() = 'service_role')
+with check (auth.role() = 'service_role');
+
+create policy "admin service access telegram review actions"
+on public.telegram_review_actions for all
+using (auth.role() = 'service_role')
+with check (auth.role() = 'service_role');
+
 create policy "service role storage access"
 on storage.objects for all
 using (bucket_id = 'slips' and auth.role() = 'service_role')
@@ -214,6 +252,7 @@ insert into public.settings (key, value)
 values
   ('line_push_policy', 'quota_aware'),
   ('admin_review_channel', 'dashboard_only'),
+  ('telegram_webhook_secret', ''),
   ('admin_review_token_ttl_hours', '24'),
   ('auto_verify_from_slip_enabled', 'false'),
   ('auto_verify_window_hours', '24'),
