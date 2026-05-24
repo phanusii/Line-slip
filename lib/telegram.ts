@@ -48,10 +48,6 @@ function base64Url(input: string | Buffer) {
   return Buffer.from(input).toString("base64url");
 }
 
-function hashToken(token: string) {
-  return crypto.createHash("sha256").update(token).digest("hex");
-}
-
 function tokenSecret(settings: SettingsMap) {
   return (
     settings.admin_review_token_secret ||
@@ -73,6 +69,65 @@ function compactName(user?: TelegramMessage["from"]) {
 
 function chatTitle(chat: TelegramChat) {
   return chat.title ?? chat.username ?? ([chat.first_name, chat.last_name].filter(Boolean).join(" ") || String(chat.id));
+}
+
+function slipIdToHex(slipId: string) {
+  return slipId.replaceAll("-", "").toLowerCase();
+}
+
+function slipHexToUuid(hex: string) {
+  if (!/^[0-9a-f]{32}$/.test(hex)) throw new Error("รหัสสลิปจาก Telegram ไม่ถูกต้อง");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function actionCode(action: TelegramAction) {
+  return action === "verified" ? "v" : "r";
+}
+
+function actionFromCode(code: string): TelegramAction {
+  if (code === "v") return "verified";
+  if (code === "r") return "rejected";
+  throw new Error("คำสั่งตรวจสลิปจาก Telegram ไม่ถูกต้อง");
+}
+
+function signTelegramReviewCallback(input: {
+  slipId: string;
+  action: TelegramAction;
+  settings: SettingsMap;
+}) {
+  const ttlHours = Number(input.settings.admin_review_token_ttl_hours || 24);
+  const expiresAtMinute = Math.floor(Date.now() / 60000) + Math.max(1, ttlHours) * 60;
+  const body = `${actionCode(input.action)}:${slipIdToHex(input.slipId)}:${expiresAtMinute.toString(36)}`;
+  const signature = signBody(body, input.settings).slice(0, 12);
+  return `r:${body}:${signature}`;
+}
+
+function verifyTelegramReviewCallback(token: string, settings: SettingsMap) {
+  const [prefix, action, slipHex, exp36, signature] = token.split(":");
+  if (prefix !== "r" || !action || !slipHex || !exp36 || !signature) {
+    throw new Error("ปุ่มตรวจสลิปไม่ถูกต้อง");
+  }
+
+  const body = `${action}:${slipHex}:${exp36}`;
+  const expected = signBody(body, settings).slice(0, 12);
+  const actualSignature = Buffer.from(signature);
+  const expectedSignature = Buffer.from(expected);
+  if (
+    actualSignature.length !== expectedSignature.length ||
+    !crypto.timingSafeEqual(actualSignature, expectedSignature)
+  ) {
+    throw new Error("ปุ่มตรวจสลิปไม่ถูกต้อง");
+  }
+
+  const expiresAtMinute = Number.parseInt(exp36, 36);
+  if (!Number.isFinite(expiresAtMinute) || Math.floor(Date.now() / 60000) > expiresAtMinute) {
+    throw new Error("ปุ่มตรวจสลิปหมดอายุแล้ว กรุณาตรวจจาก dashboard");
+  }
+
+  return {
+    slipId: slipHexToUuid(slipHex),
+    action: actionFromCode(action)
+  };
 }
 
 export function signTelegramConnectToken(input: {
@@ -155,15 +210,18 @@ export async function ensureTelegramWebhook(settings: SettingsMap) {
 }
 
 export async function getConnectedTelegramChats() {
-  const supabase = createServiceClient();
-  const { data, error } = await supabase
-    .from("telegram_admin_chats")
-    .select("*")
-    .eq("enabled", true)
-    .order("last_seen_at", { ascending: false });
-
-  if (error) throw error;
-  return data ?? [];
+  const settings = await getSettings(["telegram_chat_id"]);
+  if (!settings.telegram_chat_id) return [];
+  return [
+    {
+      id: settings.telegram_chat_id,
+      chat_id: settings.telegram_chat_id,
+      chat_title: settings.telegram_chat_id,
+      chat_type: null,
+      enabled: true,
+      last_seen_at: new Date().toISOString()
+    }
+  ];
 }
 
 export async function bindTelegramChat(input: {
@@ -174,18 +232,6 @@ export async function bindTelegramChat(input: {
   const supabase = createServiceClient();
   const now = new Date().toISOString();
   const chatId = String(input.chat.id);
-  const { error } = await supabase.from("telegram_admin_chats").upsert(
-    {
-      chat_id: chatId,
-      chat_type: input.chat.type ?? null,
-      chat_title: chatTitle(input.chat),
-      admin_email: input.adminEmail,
-      enabled: true,
-      last_seen_at: now
-    },
-    { onConflict: "chat_id" }
-  );
-  if (error) throw error;
 
   await supabase.from("settings").upsert([
     { key: "telegram_chat_id", value: chatId, updated_at: now },
@@ -196,7 +242,7 @@ export async function bindTelegramChat(input: {
     actor_email: input.adminEmail,
     actor_role: "admin",
     action: "telegram_chat_connected",
-    entity_type: "telegram_admin_chat",
+    entity_type: "settings",
     after_data: {
       chat_id: chatId,
       chat_type: input.chat.type ?? null,
@@ -205,21 +251,6 @@ export async function bindTelegramChat(input: {
     },
     reason: "เชื่อม Telegram admin chat จาก bot start link"
   });
-}
-
-async function createReviewActionToken(slipId: string, action: TelegramAction, settings: SettingsMap) {
-  const supabase = createServiceClient();
-  const token = crypto.randomBytes(18).toString("base64url");
-  const ttlHours = Number(settings.admin_review_token_ttl_hours || 24);
-  const expiresAt = new Date(Date.now() + Math.max(1, ttlHours) * 60 * 60 * 1000).toISOString();
-  const { error } = await supabase.from("telegram_review_actions").insert({
-    slip_id: slipId,
-    action,
-    token_hash: hashToken(token),
-    expires_at: expiresAt
-  });
-  if (error) throw error;
-  return token;
 }
 
 export async function sendTelegramSlipReview(input: {
@@ -241,13 +272,21 @@ export async function sendTelegramSlipReview(input: {
 
   if (!chatIds.length) throw new Error("ยังไม่ได้เชื่อม Telegram chat");
 
-  const approveToken = await createReviewActionToken(input.slipId, "verified", input.settings);
-  const rejectToken = await createReviewActionToken(input.slipId, "rejected", input.settings);
+  const approveToken = signTelegramReviewCallback({
+    slipId: input.slipId,
+    action: "verified",
+    settings: input.settings
+  });
+  const rejectToken = signTelegramReviewCallback({
+    slipId: input.slipId,
+    action: "rejected",
+    settings: input.settings
+  });
   const replyMarkup = {
     inline_keyboard: [
       [
-        { text: "อนุมัติ", callback_data: `review:${approveToken}` },
-        { text: "ปฏิเสธ", callback_data: `review:${rejectToken}` }
+        { text: "อนุมัติ", callback_data: approveToken },
+        { text: "ปฏิเสธ", callback_data: rejectToken }
       ],
       [{ text: "เปิดในเว็บ", url: input.dashboardUrl }]
     ]
@@ -300,7 +339,7 @@ export async function handleTelegramWebhook(update: TelegramUpdate) {
 
 async function handleTelegramCallback(callback: TelegramCallbackQuery) {
   const settings = await getSettings();
-  if (!callback.data?.startsWith("review:")) return;
+  if (!callback.data?.startsWith("r:")) return;
   const chatId = callback.message?.chat ? String(callback.message.chat.id) : null;
   if (!chatId || !(await isTrustedChat(chatId, settings))) {
     await callTelegram(settings, "answerCallbackQuery", {
@@ -316,29 +355,21 @@ async function handleTelegramCallback(callback: TelegramCallbackQuery) {
     text: "กำลังบันทึกผลตรวจ..."
   }).catch(() => null);
 
-  const token = callback.data.slice("review:".length);
-  const supabase = createServiceClient();
-  const { data: actionRow, error } = await supabase
-    .from("telegram_review_actions")
-    .select("*")
-    .eq("token_hash", hashToken(token))
-    .is("used_at", null)
-    .gt("expires_at", new Date().toISOString())
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!actionRow) {
+  let reviewAction: { slipId: string; action: TelegramAction };
+  try {
+    reviewAction = verifyTelegramReviewCallback(callback.data, settings);
+  } catch (error) {
     await callTelegram(settings, "answerCallbackQuery", {
       callback_query_id: callback.id,
-      text: "ปุ่มนี้หมดอายุหรือถูกใช้งานแล้ว",
+      text: error instanceof Error ? error.message : "ปุ่มนี้หมดอายุหรือถูกใช้งานแล้ว",
       show_alert: true
     }).catch(() => null);
     return;
   }
 
-  const action = actionRow.action as TelegramAction;
+  const action = reviewAction.action;
   await applySlipStatus({
-    slipId: actionRow.slip_id,
+    slipId: reviewAction.slipId,
     status: action,
     reason: action === "verified" ? "อนุมัติจาก Telegram" : "ปฏิเสธจาก Telegram",
     actor: {
@@ -348,15 +379,6 @@ async function handleTelegramCallback(callback: TelegramCallbackQuery) {
     auditAction: action === "verified" ? "telegram_review_approved" : "telegram_review_rejected",
     source: "telegram"
   });
-
-  await supabase
-    .from("telegram_review_actions")
-    .update({
-      used_at: new Date().toISOString(),
-      used_chat_id: chatId,
-      used_by: compactName(callback.from)
-    })
-    .eq("id", actionRow.id);
 
   const text = action === "verified" ? "อนุมัติสลิปแล้ว" : "ปฏิเสธสลิปแล้ว";
   await callTelegram(settings, "answerCallbackQuery", {
@@ -431,16 +453,7 @@ async function handleTelegramCommand(message: TelegramMessage) {
 }
 
 async function isTrustedChat(chatId: string, settings: SettingsMap) {
-  if (settings.telegram_chat_id === chatId) return true;
-  const supabase = createServiceClient();
-  const { data, error } = await supabase
-    .from("telegram_admin_chats")
-    .select("id")
-    .eq("chat_id", chatId)
-    .eq("enabled", true)
-    .maybeSingle();
-  if (error) throw error;
-  return Boolean(data);
+  return settings.telegram_chat_id === chatId;
 }
 
 async function sendEventsList(chatId: string, settings: SettingsMap) {
