@@ -1,8 +1,11 @@
 import crypto from "node:crypto";
 import jsQR from "jsqr";
+import { after } from "next/server";
 import sharp from "sharp";
 import { notifyAdminSlipReview } from "@/lib/admin-review";
 import { STORAGE_BUCKET } from "@/lib/env";
+import { evaluateFreeAutoSlipCheck } from "@/lib/free-auto-slip";
+import { applySlipStatus } from "@/lib/slip-status";
 import { createServiceClient } from "@/lib/supabase/server";
 
 type UploadSlipInput = {
@@ -15,11 +18,14 @@ type UploadSlipInput = {
   mimeType?: string | null;
   lineMessageId?: string | null;
   lineUserDbId?: string | null;
+  deferAutoReview?: boolean;
 };
 
 export type UploadSlipResult = {
-  id: string;
-  status: "manual_review" | "duplicate_slip";
+  id?: string;
+  status: "manual_review" | "duplicate_blocked" | "verified";
+  autoCheckStatus?: string | null;
+  autoCheckReasons?: string[];
   duplicateOfId?: string;
 };
 
@@ -35,7 +41,109 @@ export function hashImage(buffer: Buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
 
+function isMissingColumnError(error: unknown, column: string) {
+  const message = error instanceof Error ? error.message : JSON.stringify(error);
+  return message.includes(column) && message.includes("schema cache");
+}
+
+function isDuplicateSlipConstraintError(error: unknown) {
+  const supabaseError = error as { code?: string; message?: string; details?: string };
+  const text = `${supabaseError.message ?? ""} ${supabaseError.details ?? ""}`;
+  return (
+    supabaseError.code === "23505" &&
+    text.includes("slip_submissions") &&
+    (text.includes("slip_ref") || text.includes("image_hash"))
+  );
+}
+
+async function auditDuplicateSlipAttempt(
+  supabase: ReturnType<typeof createServiceClient>,
+  input: UploadSlipInput,
+  duplicate: { id: string; event_id?: string | null; payment_target_id?: string | null },
+  reason: "duplicate_slip_qr" | "duplicate_image_hash",
+  details: { imageHash: string; slipRef: string | null }
+) {
+  const audit = await supabase.from("audit_logs").insert({
+    actor_email: "system-duplicate-blocker",
+    actor_role: "viewer",
+    action: "duplicate_slip_blocked",
+    entity_type: "slip_submission",
+    entity_id: duplicate.id,
+    event_id: input.eventId,
+    after_data: {
+      duplicate_of_id: duplicate.id,
+      duplicate_by: reason === "duplicate_slip_qr" ? "slip_ref" : "image_hash",
+      duplicate_event_id: duplicate.event_id ?? null,
+      duplicate_payment_target_id: duplicate.payment_target_id ?? null,
+      attempted_payment_target_id: input.paymentTargetId ?? null,
+      line_user_id: input.lineUserDbId ?? null,
+      line_message_id: input.lineMessageId ?? null,
+      image_hash: details.imageHash,
+      slip_ref: details.slipRef
+    },
+    reason: "Blocked duplicate slip before storage upload and database insert"
+  });
+
+  if (audit.error) {
+    console.error("duplicate slip audit failed", audit.error);
+  }
+}
+
+async function findDuplicateSlip(
+  supabase: ReturnType<typeof createServiceClient>,
+  imageHash: string,
+  slipRef: string | null
+) {
+  if (slipRef) {
+    const qrDuplicate = await supabase
+      .from("slip_submissions")
+      .select("id,event_id,payment_target_id")
+      .eq("slip_ref", slipRef)
+      .is("metadata_deleted_at", null)
+      .limit(1)
+      .maybeSingle();
+
+    if (qrDuplicate.error) {
+      throw qrDuplicate.error;
+    }
+
+    if (qrDuplicate.data) {
+      return {
+        duplicate: qrDuplicate.data,
+        reason: "duplicate_slip_qr" as const
+      };
+    }
+  }
+
+  const imageDuplicate = await supabase
+    .from("slip_submissions")
+    .select("id,event_id,payment_target_id")
+    .eq("image_hash", imageHash)
+    .is("metadata_deleted_at", null)
+    .limit(1)
+    .maybeSingle();
+
+  if (imageDuplicate.error) {
+    throw imageDuplicate.error;
+  }
+
+  if (imageDuplicate.data) {
+    return {
+      duplicate: imageDuplicate.data,
+      reason: "duplicate_image_hash" as const
+    };
+  }
+
+  return null;
+}
+
 export async function readSlipQrRef(buffer: Buffer) {
+  const data = await readSlipQrPayload(buffer);
+  if (!data) return null;
+  return `qr:${crypto.createHash("sha256").update(data).digest("hex")}`;
+}
+
+export async function readSlipQrPayload(buffer: Buffer) {
   const image = await sharp(buffer, { failOn: "none" })
     .rotate()
     .resize({ width: 1400, withoutEnlargement: true })
@@ -50,84 +158,33 @@ export async function readSlipQrRef(buffer: Buffer) {
   );
 
   if (!decoded?.data) return null;
-  return `qr:${crypto.createHash("sha256").update(decoded.data).digest("hex")}`;
+  return decoded.data;
 }
 
 export async function uploadSlipImage(input: UploadSlipInput) {
   const supabase = createServiceClient();
   const normalized = await normalizeSlipImage(input.sourceBuffer);
   const imageHash = hashImage(normalized);
-  const slipRef = await readSlipQrRef(input.sourceBuffer).catch(() => null);
+  const slipQrPayload = await readSlipQrPayload(input.sourceBuffer).catch(() => null);
+  const slipRef = slipQrPayload
+    ? `qr:${crypto.createHash("sha256").update(slipQrPayload).digest("hex")}`
+    : null;
   const now = new Date();
   const datePart = now.toISOString().replace(/[:.]/g, "-");
   const targetSegment = input.paymentTargetId ?? "no-target";
   const amount = Number(input.amountExpected ?? 0).toFixed(2);
 
-  const imageDuplicate = await supabase
-    .from("slip_submissions")
-    .select("id,event_id,payment_target_id")
-    .eq("image_hash", imageHash)
-    .is("metadata_deleted_at", null)
-    .limit(1)
-    .maybeSingle();
-
-  if (imageDuplicate.error) {
-    throw imageDuplicate.error;
-  }
-
-  const qrDuplicate = slipRef
-    ? await supabase
-        .from("slip_submissions")
-        .select("id,event_id,payment_target_id")
-        .eq("slip_ref", slipRef)
-        .is("metadata_deleted_at", null)
-        .limit(1)
-        .maybeSingle()
-    : { data: null, error: null };
-
-  if (qrDuplicate.error) {
-    throw qrDuplicate.error;
-  }
-
-  const duplicate = qrDuplicate.data ?? imageDuplicate.data;
+  const duplicate = await findDuplicateSlip(supabase, imageHash, slipRef);
   if (duplicate) {
-    const duplicateInsert = await supabase
-      .from("slip_submissions")
-      .insert({
-        event_id: input.eventId,
-        payment_target_id: input.paymentTargetId ?? null,
-        line_user_id: input.lineUserDbId ?? null,
-        line_message_id: input.lineMessageId ?? null,
-        storage_bucket: STORAGE_BUCKET,
-        storage_path: null,
-        original_filename: `${input.personName ?? "unknown"}_${amount}_duplicate.jpg`,
-        file_size: 0,
-        mime_type: "image/jpeg",
-        image_hash: imageHash,
-        slip_ref: null,
-        amount_expected: input.amountExpected ?? null,
-        status: "duplicate_slip",
-        rejection_reason: `duplicate ${qrDuplicate.data ? "slip_ref" : "image_hash"} of slip ${duplicate.id}`
-      })
-      .select("id,status")
-      .single();
-
-    if (duplicateInsert.error) {
-      throw duplicateInsert.error;
-    }
-
-    if (input.paymentTargetId) {
-      await supabase
-        .from("payment_targets")
-        .update({ status: "duplicate_slip" })
-        .eq("id", input.paymentTargetId)
-        .neq("status", "verified");
-    }
-
+    await auditDuplicateSlipAttempt(supabase, input, duplicate.duplicate, duplicate.reason, {
+      imageHash,
+      slipRef
+    });
     return {
-      id: duplicateInsert.data.id,
-      status: "duplicate_slip",
-      duplicateOfId: duplicate.id
+      status: "duplicate_blocked",
+      autoCheckStatus: "duplicate_blocked",
+      autoCheckReasons: [duplicate.reason],
+      duplicateOfId: duplicate.duplicate.id
     } satisfies UploadSlipResult;
   }
 
@@ -169,7 +226,96 @@ export async function uploadSlipImage(input: UploadSlipInput) {
 
   if (inserted.error) {
     await supabase.storage.from(STORAGE_BUCKET).remove([path]);
+    if (isDuplicateSlipConstraintError(inserted.error)) {
+      const concurrentDuplicate = await findDuplicateSlip(supabase, imageHash, slipRef);
+      if (concurrentDuplicate) {
+        await auditDuplicateSlipAttempt(
+          supabase,
+          input,
+          concurrentDuplicate.duplicate,
+          concurrentDuplicate.reason,
+          { imageHash, slipRef }
+        );
+        return {
+          status: "duplicate_blocked",
+          autoCheckStatus: "duplicate_blocked",
+          autoCheckReasons: [concurrentDuplicate.reason],
+          duplicateOfId: concurrentDuplicate.duplicate.id
+        } satisfies UploadSlipResult;
+      }
+    }
     throw inserted.error;
+  }
+
+  if (input.paymentTargetId) {
+    const replaced = await supabase
+      .from("slip_submissions")
+      .update({ replaced_by_slip_id: inserted.data.id })
+      .eq("payment_target_id", input.paymentTargetId)
+      .is("metadata_deleted_at", null)
+      .is("replaced_by_slip_id", null)
+      .neq("id", inserted.data.id)
+      .not("status", "in", "(verified,deleted)");
+
+    if (replaced.error && !isMissingColumnError(replaced.error, "replaced_by_slip_id")) {
+      await supabase.from("slip_submissions").delete().eq("id", inserted.data.id);
+      await supabase.storage.from(STORAGE_BUCKET).remove([path]);
+      throw replaced.error;
+    }
+  }
+
+  async function runAutoReview() {
+    const autoCheck = await evaluateFreeAutoSlipCheck({
+      slipId: inserted.data.id,
+      eventId: input.eventId,
+      paymentTargetId: input.paymentTargetId ?? null,
+      lineUserDbId: input.lineUserDbId ?? null,
+      slipRef,
+      normalizedBuffer: normalized,
+      amountExpected: input.amountExpected ?? null
+    });
+
+    const autoCheckUpdated = await supabase
+      .from("slip_submissions")
+      .update({
+        amount_detected: autoCheck.amountDetected ?? null,
+        auto_check_status: autoCheck.status,
+        auto_check_reasons: autoCheck.reasons,
+        auto_checked_at: new Date().toISOString(),
+        ocr_result: autoCheck.ocrResult ?? null
+      })
+      .eq("id", inserted.data.id);
+
+    if (autoCheckUpdated.error) throw autoCheckUpdated.error;
+
+    if (autoCheck.shouldVerify) {
+      await applySlipStatus({
+        slipId: inserted.data.id,
+        status: "verified",
+        reason:
+          "ตรวจผ่านอัตโนมัติจากรูปสลิป: QR ไม่ซ้ำ รูปไม่ซ้ำ ยอดเฉพาะรายชื่อ และอยู่ในช่วงเวลาที่กำหนด ไม่ใช่การยืนยันจากธนาคาร",
+        actor: {
+          actor_email: "system-free-auto-review",
+          actor_role: "viewer"
+        },
+        auditAction: "auto_verify_from_slip",
+        source: "free_auto_review"
+      });
+
+      return {
+        status: "verified" as const,
+        autoCheckStatus: autoCheck.status,
+        autoCheckReasons: autoCheck.reasons
+      };
+    }
+
+    await notifyAdminSlipReview(inserted.data.id);
+
+    return {
+      status: "manual_review" as const,
+      autoCheckStatus: autoCheck.status,
+      autoCheckReasons: autoCheck.reasons
+    };
   }
 
   if (input.paymentTargetId) {
@@ -184,11 +330,33 @@ export async function uploadSlipImage(input: UploadSlipInput) {
       .neq("status", "verified");
   }
 
-  await notifyAdminSlipReview(inserted.data.id);
+  if (input.deferAutoReview) {
+    after(async () => {
+      try {
+        await runAutoReview();
+      } catch (error) {
+        console.error("deferred slip auto review failed", error);
+        await notifyAdminSlipReview(inserted.data.id).catch((notifyError) => {
+          console.error("fallback slip review notification failed", notifyError);
+        });
+      }
+    });
+
+    return {
+      id: inserted.data.id,
+      status: "manual_review",
+      autoCheckStatus: "queued",
+      autoCheckReasons: ["auto_review_queued"]
+    } satisfies UploadSlipResult;
+  }
+
+  const autoReview = await runAutoReview();
 
   return {
     id: inserted.data.id,
-    status: "manual_review"
+    status: autoReview.status,
+    autoCheckStatus: autoReview.autoCheckStatus,
+    autoCheckReasons: autoReview.autoCheckReasons
   } satisfies UploadSlipResult;
 }
 

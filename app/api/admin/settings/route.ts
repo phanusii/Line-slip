@@ -53,5 +53,9 @@ export async function POST(request: NextRequest) {
 }
 
 function isSecretKey(key: SettingKey) {
-  return key === "telegram_bot_token" || key === "admin_review_token_secret";
+  return (
+    key === "telegram_bot_token" ||
+    key === "telegram_webhook_secret" ||
+    key === "admin_review_token_secret"
+  );
 }

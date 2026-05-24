@@ -54,7 +54,6 @@ export async function POST(request: NextRequest) {
       .from("payment_targets")
       .select("id,event_id,display_name,amount_due,status,events(id,slug,is_open,archived_at)")
       .eq("selected_line_user_id", lineUser.id)
-      .neq("status", "verified")
       .neq("status", "deleted")
       .order("updated_at", { ascending: false })
       .limit(1);
@@ -72,6 +71,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (target.status === "verified") {
+      return NextResponse.json({
+        ok: true,
+        alreadyVerified: true,
+        message: "รายการนี้จ่ายเรียบร้อยแล้ว ไม่ต้องส่งสลิปเพิ่ม"
+      });
+    }
+
     const event = Array.isArray(target.events) ? target.events[0] : target.events;
     if (!event || !event.is_open || event.archived_at) {
       return NextResponse.json({ error: "งานนี้ปิดรับสลิปแล้ว" }, { status: 400 });
@@ -86,16 +93,19 @@ export async function POST(request: NextRequest) {
       amountExpected: Number(target.amount_due),
       sourceBuffer: buffer,
       mimeType: file.type,
-      lineUserDbId: lineUser.id
+      lineUserDbId: lineUser.id,
+      deferAutoReview: true
     });
 
     return NextResponse.json({
       ok: true,
       slip,
       message:
-        slip.status === "duplicate_slip"
-          ? "สลิปนี้เคยถูกส่งแล้ว ไม่สามารถใช้สลิปซ้ำได้"
-          : "รับสลิปแล้ว ระบบบันทึกไฟล์เรียบร้อยแล้ว รอผู้ดูแลตรวจสอบ"
+        slip.status === "duplicate_blocked"
+          ? "สลิปนี้เคยส่งแล้ว ระบบไม่บันทึกซ้ำ"
+          : slip.status === "verified"
+            ? "ตรวจสลิปผ่านอัตโนมัติจากรูปสลิปแล้ว โปรดทราบว่านี่ไม่ใช่การยืนยันจากธนาคาร"
+          : "รับสลิปใหม่แล้ว ระบบจะใช้ใบล่าสุดให้แอดมินตรวจ"
     });
   } catch (error) {
     return NextResponse.json({ error: formatApiError(error) }, { status: 500 });

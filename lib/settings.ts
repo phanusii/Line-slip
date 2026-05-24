@@ -6,9 +6,15 @@ export const SETTING_KEYS = [
   "admin_review_channel",
   "telegram_bot_token",
   "telegram_chat_id",
+  "telegram_webhook_secret",
   "discord_webhook_url",
   "admin_review_token_secret",
-  "admin_review_token_ttl_hours"
+  "admin_review_token_ttl_hours",
+  "auto_verify_from_slip_enabled",
+  "auto_verify_window_hours",
+  "auto_verify_requires_unique_amount",
+  "auto_verify_ocr_enabled",
+  "auto_verify_ocr_min_confidence"
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -30,4 +36,15 @@ export function getAdminReviewChannel(settings: SettingsMap) {
     return settings.admin_review_channel;
   }
   return "dashboard_only";
+}
+
+export function getBooleanSetting(settings: SettingsMap, key: SettingKey, defaultValue = false) {
+  const value = settings[key];
+  if (value === undefined || value === "") return defaultValue;
+  return value === "true" || value === "1" || value === "enabled";
+}
+
+export function getNumberSetting(settings: SettingsMap, key: SettingKey, defaultValue: number) {
+  const value = Number(settings[key]);
+  return Number.isFinite(value) && value > 0 ? value : defaultValue;
 }

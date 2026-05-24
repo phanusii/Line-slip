@@ -62,11 +62,17 @@ create table public.slip_submissions (
   mime_type text,
   image_hash text,
   slip_ref text,
+  duplicate_of_slip_id uuid references public.slip_submissions(id) on delete set null,
+  replaced_by_slip_id uuid references public.slip_submissions(id) on delete set null,
   amount_expected numeric(12, 2),
   amount_detected numeric(12, 2),
   transfer_datetime timestamptz,
   status public.payment_status not null default 'manual_review',
   rejection_reason text,
+  auto_check_status text,
+  auto_check_reasons jsonb not null default '[]'::jsonb,
+  auto_checked_at timestamptz,
+  ocr_result jsonb,
   file_deleted_at timestamptz,
   metadata_deleted_at timestamptz,
   created_at timestamptz not null default now(),
@@ -112,7 +118,12 @@ create index payment_targets_event_status_idx on public.payment_targets(event_id
 create index slip_submissions_event_status_idx on public.slip_submissions(event_id, status);
 create index slip_submissions_storage_path_idx on public.slip_submissions(storage_path) where storage_path is not null;
 create index slip_submissions_image_hash_idx on public.slip_submissions(image_hash) where image_hash is not null and metadata_deleted_at is null;
+create unique index slip_submissions_image_hash_active_unique_idx on public.slip_submissions(image_hash) where image_hash is not null and metadata_deleted_at is null and status <> 'duplicate_slip'::public.payment_status;
 create unique index slip_submissions_slip_ref_unique_idx on public.slip_submissions(slip_ref) where slip_ref is not null and metadata_deleted_at is null;
+create index slip_submissions_auto_check_status_idx on public.slip_submissions(event_id, auto_check_status) where metadata_deleted_at is null;
+create index slip_submissions_payment_target_created_idx on public.slip_submissions(payment_target_id, created_at desc) where metadata_deleted_at is null;
+create index slip_submissions_duplicate_of_idx on public.slip_submissions(duplicate_of_slip_id) where duplicate_of_slip_id is not null;
+create index slip_submissions_replaced_by_idx on public.slip_submissions(replaced_by_slip_id) where replaced_by_slip_id is not null;
 create index audit_logs_event_created_idx on public.audit_logs(event_id, created_at desc);
 
 create or replace function public.touch_updated_at()
@@ -203,7 +214,13 @@ insert into public.settings (key, value)
 values
   ('line_push_policy', 'quota_aware'),
   ('admin_review_channel', 'dashboard_only'),
-  ('admin_review_token_ttl_hours', '24')
+  ('telegram_webhook_secret', ''),
+  ('admin_review_token_ttl_hours', '24'),
+  ('auto_verify_from_slip_enabled', 'false'),
+  ('auto_verify_window_hours', '24'),
+  ('auto_verify_requires_unique_amount', 'true'),
+  ('auto_verify_ocr_enabled', 'false'),
+  ('auto_verify_ocr_min_confidence', '45')
 on conflict (key) do nothing;
 
 -- Returns actual PostgreSQL database size in bytes (accurate, includes indexes and TOAST)

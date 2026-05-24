@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatMoney } from "@/lib/format";
 
 type LiffProfile = {
@@ -19,6 +19,12 @@ type LiffApi = {
 };
 
 type LiffMode = "pay" | "slip" | "me";
+type UploadPhase = "idle" | "ready" | "uploading" | "done" | "error";
+
+type UploadState = {
+  phase: UploadPhase;
+  message?: string;
+};
 
 type EventRow = {
   id: string;
@@ -57,65 +63,32 @@ type MyPayment = {
   }>;
 };
 
+type SlipUploadResponse = {
+  message?: string;
+  error?: string;
+  slip?: {
+    id?: string;
+    status: string;
+  };
+  alreadyVerified?: boolean;
+};
+
+const eventsCacheKey = "line-slip:liff-events:v1";
+
+function targetsCacheKey(eventId: string) {
+  return `line-slip:liff-targets:${eventId}:v1`;
+}
+
 const statusText: Record<string, string> = {
   unpaid: "ยังไม่จ่าย",
   pending_slip: "รอส่งสลิป",
-  verified: "จ่ายแล้ว ✓",
-  manual_review: "รอตรวจสอบ",
+  verified: "จ่ายแล้ว",
+  manual_review: "รอตรวจ",
   amount_mismatch: "ยอดไม่ตรง",
   duplicate_slip: "สลิปซ้ำ",
   rejected: "ไม่ผ่าน",
   deleted: "ลบแล้ว"
 };
-
-const modeTitle: Record<LiffMode, string> = {
-  pay: "สร้าง QR Code",
-  slip: "ส่งสลิป",
-  me: "สถานะของฉัน"
-};
-
-// Inline SVG icons (path-only, stroke or fill coloured via currentColor)
-function IconQr() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="7" height="7" rx="1"/>
-      <rect x="14" y="3" width="7" height="7" rx="1"/>
-      <rect x="3" y="14" width="7" height="7" rx="1"/>
-      <rect x="14" y="14" width="3" height="3"/>
-      <rect x="18" y="14" width="3" height="3"/>
-      <rect x="14" y="18" width="3" height="3"/>
-      <rect x="18" y="18" width="3" height="3"/>
-    </svg>
-  );
-}
-
-function IconSlip() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-      <polyline points="14 2 14 8 20 8"/>
-      <line x1="9" y1="13" x2="15" y2="13"/>
-      <line x1="9" y1="17" x2="12" y2="17"/>
-    </svg>
-  );
-}
-
-function IconStatus() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-      <polyline points="22 4 12 14.01 9 11.01"/>
-    </svg>
-  );
-}
-
-function IconChat() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-    </svg>
-  );
-}
 
 declare global {
   interface Window {
@@ -169,6 +142,54 @@ function modeFromUrl(): LiffMode {
   return "pay";
 }
 
+function readEventsCache() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(eventsCacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { savedAt: number; events: EventRow[] };
+    if (!parsed.savedAt || Date.now() - parsed.savedAt > 60_000) return null;
+    return parsed.events;
+  } catch {
+    return null;
+  }
+}
+
+function writeEventsCache(events: EventRow[]) {
+  try {
+    window.sessionStorage.setItem(
+      eventsCacheKey,
+      JSON.stringify({ savedAt: Date.now(), events })
+    );
+  } catch {
+    // Ignore private browsing/session storage errors.
+  }
+}
+
+function readTargetsCache(eventId: string) {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(targetsCacheKey(eventId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { savedAt: number; targets: EventRow["targets"] };
+    if (!parsed.savedAt || Date.now() - parsed.savedAt > 45_000) return null;
+    return parsed.targets;
+  } catch {
+    return null;
+  }
+}
+
+function writeTargetsCache(eventId: string, targets: EventRow["targets"]) {
+  try {
+    window.sessionStorage.setItem(
+      targetsCacheKey(eventId),
+      JSON.stringify({ savedAt: Date.now(), targets })
+    );
+  } catch {
+    // Ignore private browsing/session storage errors.
+  }
+}
+
 export default function LiffPaymentPage() {
   const liffId = process.env.NEXT_PUBLIC_LIFF_ID ?? "";
   const [mode, setMode] = useState<LiffMode>("pay");
@@ -182,10 +203,21 @@ export default function LiffPaymentPage() {
   const [myPayments, setMyPayments] = useState<MyPayment[]>([]);
   const [contactUrl, setContactUrl] = useState("");
   const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipPreviewUrl, setSlipPreviewUrl] = useState<string | null>(null);
+  const [uploadState, setUploadState] = useState<UploadState>({ phase: "idle" });
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [booting, setBooting] = useState(true);
+  const [targetsLoading, setTargetsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!slipFile) return;
+    const url = URL.createObjectURL(slipFile);
+    setSlipPreviewUrl(url);
+    setUploadState({ phase: "ready", message: "เลือกรูปสลิปแล้ว กดอัปโหลดเพื่อส่งให้ระบบ" });
+    return () => URL.revokeObjectURL(url);
+  }, [slipFile]);
 
   useEffect(() => {
     async function boot() {
@@ -206,16 +238,16 @@ export default function LiffPaymentPage() {
         if (!token) throw new Error("ไม่พบ LINE access token กรุณาเปิดผ่าน LINE อีกครั้ง");
         setAccessToken(token);
 
-        // Profile + contact are non-critical — fire and forget
+        // Profile + contact fire in background — not critical for UI
         void window.liff.getProfile().then((p) => setProfile(p)).catch(() => null);
         void jsonFetch<{ contactUrl: string }>("/api/liff/contact", withLineAccessToken(token))
           .then((data) => setContactUrl(data.contactUrl))
           .catch(() => null);
 
-        // Phase 1 complete — show the UI shell immediately
+        // Phase 1 done — show UI shell immediately
         setBooting(false);
 
-        // Phase 2 — load mode data behind a busy indicator, not a full-screen spinner
+        // Phase 2 — load mode data behind busy indicator
         setBusy(true);
         try {
           await loadMode(activeMode, token);
@@ -231,7 +263,6 @@ export default function LiffPaymentPage() {
     }
 
     void boot();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liffId]);
 
   const selectedEvent = useMemo(
@@ -273,12 +304,47 @@ export default function LiffPaymentPage() {
       setNotice("ยังไม่พบ QR ที่สร้างไว้ กรุณาเลือกงานและรายชื่อก่อนส่งสลิป");
     }
 
+    const cachedEvents = readEventsCache();
+    if (cachedEvents?.length) {
+      setEvents(cachedEvents);
+      setSelectedEventId((current) => current || cachedEvents[0]?.id || "");
+      const eventId = selectedEventId || cachedEvents[0]?.id || "";
+      if (eventId) void loadTargets(eventId, token);
+    }
+
     const eventsData = await jsonFetch<{ events: EventRow[] }>(
-      "/api/liff/events",
+      "/api/liff/events?light=1",
       withLineAccessToken(token)
     );
+    writeEventsCache(eventsData.events);
     setEvents(eventsData.events);
-    setSelectedEventId(eventsData.events[0]?.id ?? "");
+    const firstEventId = eventsData.events[0]?.id ?? "";
+    setSelectedEventId(firstEventId);
+    if (firstEventId) await loadTargets(firstEventId, token);
+  }
+
+  async function loadTargets(eventId: string, token = accessToken) {
+    if (!eventId || !token) return;
+    const cachedTargets = readTargetsCache(eventId);
+    if (cachedTargets) {
+      setEvents((current) =>
+        current.map((event) => (event.id === eventId ? { ...event, targets: cachedTargets } : event))
+      );
+    }
+
+    setTargetsLoading(true);
+    try {
+      const data = await jsonFetch<{ targets: EventRow["targets"] }>(
+        `/api/liff/targets?eventId=${encodeURIComponent(eventId)}`,
+        withLineAccessToken(token)
+      );
+      writeTargetsCache(eventId, data.targets);
+      setEvents((current) =>
+        current.map((event) => (event.id === eventId ? { ...event, targets: data.targets } : event))
+      );
+    } finally {
+      setTargetsLoading(false);
+    }
   }
 
   function switchMode(nextMode: LiffMode) {
@@ -306,11 +372,20 @@ export default function LiffPaymentPage() {
       });
       setSelectedTargetId(targetId);
       setResult(data);
-      const refreshed = await jsonFetch<{ events: EventRow[] }>(
-        "/api/liff/events",
-        withLineAccessToken(accessToken)
+      setEvents((current) =>
+        current.map((event) =>
+          event.id === data.event.id
+            ? {
+                ...event,
+                targets: event.targets.map((target) =>
+                  target.id === targetId
+                    ? { ...target, status: "pending_slip", is_selected: true }
+                    : { ...target, is_selected: false }
+                )
+              }
+            : event
+        )
       );
-      setEvents(refreshed.events);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -319,8 +394,8 @@ export default function LiffPaymentPage() {
   }
 
   async function uploadSlipForTarget(targetId: string, file: File) {
-    if (!accessToken || !targetId) return;
-    setBusy(true);
+    if (!accessToken || !targetId) return null;
+    setUploadState({ phase: "uploading", message: "กำลังอัปโหลดสลิป..." });
     setError(null);
     setNotice(null);
     try {
@@ -329,36 +404,44 @@ export default function LiffPaymentPage() {
       form.set("targetId", targetId);
       form.set("file", file);
       const response = await fetch("/api/liff/slip", { method: "POST", body: form });
-      const data = (await response.json()) as { message?: string; error?: string };
+      const data = (await response.json()) as SlipUploadResponse;
       if (!response.ok) throw new Error(data.error ?? "อัปโหลดสลิปไม่สำเร็จ");
-      setNotice(data.message ?? "รับสลิปแล้ว รอผู้ดูแลตรวจสอบ");
-      setSlipFile(null);
+      const message = data.message ?? "อัปโหลดสลิปเสร็จแล้ว รอผู้ดูแลตรวจสอบ";
+      setUploadState({ phase: "done", message });
+      setNotice(message);
+      setResult((current) =>
+        current?.target.id === targetId
+          ? { ...current, target: { ...current.target, status: data.alreadyVerified ? "verified" : "manual_review" } }
+          : current
+      );
       if (mode === "me") await loadMode("me");
+      return data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setUploadState({ phase: "error", message });
+      setError(message);
+      return null;
     } finally {
-      setBusy(false);
+      setUploadState((current) =>
+        current.phase === "uploading"
+          ? { phase: "idle" }
+          : current
+      );
     }
   }
 
   async function uploadSlip() {
     if (!slipFile || !result?.target.id) return;
     await uploadSlipForTarget(result.target.id, slipFile);
-    // After upload, mark as pending review so upload section hides automatically
-    setResult((prev) =>
-      prev ? { ...prev, target: { ...prev.target, status: "manual_review" } } : null
-    );
   }
 
   if (!liffId) {
     return (
       <main className="liffShell">
-        <header className="liffHero compactLiffHero">
-          <h1>LINE Payment</h1>
-        </header>
         <section className="liffCard">
-          <span className="badge warn">ยังไม่ตั้งค่า</span>
-          <p className="muted">ตั้งค่า NEXT_PUBLIC_LIFF_ID บน Vercel แล้ว redeploy</p>
+          <span className="brandKicker">LINE LIFF</span>
+          <h1>ยังไม่ได้ตั้งค่า LIFF ID</h1>
+          <p className="muted">ตั้งค่า NEXT_PUBLIC_LIFF_ID บน Vercel แล้ว redeploy อีกครั้ง</p>
         </section>
       </main>
     );
@@ -366,43 +449,35 @@ export default function LiffPaymentPage() {
 
   return (
     <main className="liffShell withFloatingBar">
-      {/* ── Compact sticky header ── */}
-      <header className="liffHero compactLiffHero">
-        <h1>
-          {modeTitle[mode]}
-        </h1>
+      <section className={result ? "liffHero compactLiffHero liffHeroWithResult" : "liffHero compactLiffHero"}>
+        <span className="brandKicker">LINE Payment</span>
+        <h1>{mode === "me" ? "สถานะของฉัน" : mode === "slip" ? "ส่งสลิป" : "สร้าง QR Code"}</h1>
+        <p>
+          {mode === "me"
+            ? "ดูงานที่เลือกไว้และสถานะการตรวจสลิป"
+            : "เลือกชื่อ สแกนจ่าย แล้วอัปโหลดสลิปในหน้าเดียว"}
+        </p>
         {profile ? (
-          <span className="badge ok" style={{ fontSize: "11px", maxWidth: "120px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {profile.displayName}
-          </span>
+          <span className="badge ok">{profile.displayName}</span>
         ) : booting ? (
           <span className="liffSpinner" style={{ width: 18, height: 18, borderWidth: 2 }} />
         ) : null}
-        <p aria-hidden="false">
-          {mode === "me"
-            ? "ดูงานที่เลือกไว้และสถานะการตรวจสลิป"
-            : "เลือกชื่อ สแกนจ่าย แล้วอัปโหลดสลิป"}
-        </p>
-      </header>
+      </section>
 
-      {/* ── Error ── */}
       {error ? (
-        <section className="alertPanel" role="alert">
+        <section className="alertPanel">
           <span className="badge danger">ข้อผิดพลาด</span>
           <p>{error}</p>
         </section>
       ) : null}
 
-      {/* ── Notice ── */}
       {notice ? (
-        <div className="liffCard" style={{ background: "rgba(235,255,246,0.98)", borderColor: "rgba(7,147,111,0.2)" }}>
-          <p style={{ margin: 0, fontSize: 13, color: "#065f46", fontWeight: 700 }}>
-            {notice}
-          </p>
-        </div>
+        <section className="hintBox">
+          <strong>แจ้งเตือน</strong>
+          <p>{notice}</p>
+        </section>
       ) : null}
 
-      {/* ── Loading boot state ── */}
       {booting ? (
         <div className="liffLoading">
           <span className="liffSpinner" />
@@ -423,15 +498,18 @@ export default function LiffPaymentPage() {
                 <span>งานเรียกเก็บเงิน</span>
                 <select
                   value={selectedEvent?.id ?? ""}
-                  onChange={(e) => {
-                    setSelectedEventId(e.target.value);
+                  onChange={(event) => {
+                    setSelectedEventId(event.target.value);
                     setSelectedTargetId("");
                     setResult(null);
                     setSearch("");
+                    void loadTargets(event.target.value);
                   }}
                 >
-                  {events.map((ev) => (
-                    <option key={ev.id} value={ev.id}>{ev.name}</option>
+                  {events.map((event) => (
+                    <option key={event.id} value={event.id}>
+                      {event.name}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -440,27 +518,24 @@ export default function LiffPaymentPage() {
                 <span>ค้นหารายชื่อ</span>
                 <input
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="พิมพ์ชื่อเพื่อค้นหา…"
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="พิมพ์ชื่อเพื่อค้นหาเร็ว ๆ"
                 />
               </label>
 
-              {busy && events.length === 0 ? (
-                <div className="liffLoading" style={{ minHeight: 120 }}>
-                  <span className="liffSpinner" />
-                  <span style={{ fontSize: 13, color: "var(--muted)" }}>กำลังโหลดรายการ…</span>
-                </div>
-              ) : selectedEvent ? (
+              {selectedEvent ? (
                 <>
                   {!selectedEvent.has_promptpay ? (
                     <div className="hintBox">
-                      <strong>ยังไม่มี PromptPay</strong>
+                      <strong>งานนี้ยังไม่มี PromptPay</strong>
                       <p>แจ้งผู้ดูแลให้ใส่ PromptPay ID ก่อนสร้าง QR Code</p>
                     </div>
                   ) : null}
 
                   <div className="targetList compactTargets">
-                    {filteredTargets.length ? (
+                    {targetsLoading && !filteredTargets.length ? (
+                      <div className="emptyState">กำลังโหลดรายชื่อ...</div>
+                    ) : filteredTargets.length ? (
                       filteredTargets.map((target) => (
                         <button
                           key={target.id}
@@ -473,9 +548,7 @@ export default function LiffPaymentPage() {
                         >
                           <span>
                             <strong>{target.display_name}</strong>
-                            <small>
-                              {target.is_selected ? "เคยเลือกไว้แล้ว" : (statusText[target.status] ?? target.status)}
-                            </small>
+                            <small>{target.is_selected ? "เคยเลือกไว้แล้ว" : statusText[target.status] ?? target.status}</small>
                           </span>
                           <b>{formatMoney(target.amount_due)}</b>
                         </button>
@@ -484,12 +557,6 @@ export default function LiffPaymentPage() {
                       <div className="emptyState">ไม่พบรายชื่อที่ค้นหา</div>
                     )}
                   </div>
-
-                  {busy ? (
-                    <div className="liffLoading" style={{ minHeight: 60 }}>
-                      <span className="liffSpinner" />
-                    </div>
-                  ) : null}
                 </>
               ) : (
                 <div className="emptyState">ยังไม่มีงานที่เปิดรับสลิป</div>
@@ -499,91 +566,74 @@ export default function LiffPaymentPage() {
             <PaymentAndSlipCard
               result={result}
               slipFile={slipFile}
+              slipPreviewUrl={slipPreviewUrl}
+              uploadState={uploadState}
               busy={busy}
               onFile={setSlipFile}
               onUpload={uploadSlip}
               onChangeName={() => {
                 setResult(null);
                 setSlipFile(null);
+                setSlipPreviewUrl(null);
+                setUploadState({ phase: "idle" });
                 setMode("pay");
                 window.history.replaceState(null, "", "/liff?page=pay");
+                void loadMode("pay");
               }}
             />
           )}
         </>
       )}
 
-      {/* ── Floating bottom nav ── */}
       <nav className="liffFloatingBar" aria-label="เมนูลัด">
-        <button className={mode === "pay" ? "active" : ""} onClick={() => switchMode("pay")}>
-          <span className="liffNavIcon"><IconQr /></span>
-          <span>QR</span>
-        </button>
-        <button className={mode === "slip" ? "active" : ""} onClick={() => switchMode("slip")}>
-          <span className="liffNavIcon"><IconSlip /></span>
-          <span>สลิป</span>
-        </button>
-        <button className={mode === "me" ? "active" : ""} onClick={() => switchMode("me")}>
-          <span className="liffNavIcon"><IconStatus /></span>
-          <span>สถานะ</span>
-        </button>
-        <a
-          href={contactUrl || "#"}
-          onClick={(e) => {
-            if (!contactUrl) {
-              e.preventDefault();
-              setNotice("ติดต่อผู้ดูแลผ่าน LINE Official Account นี้");
-            }
-          }}
-        >
-          <span className="liffNavIcon"><IconChat /></span>
-          <span>ติดต่อ</span>
+        {[
+          ["pay", "QR"],
+          ["slip", "สลิป"],
+          ["me", "สถานะ"]
+        ].map(([value, label]) => (
+          <button key={value} className={mode === value ? "active" : ""} onClick={() => switchMode(value as LiffMode)}>
+            {label}
+          </button>
+        ))}
+        <a href={contactUrl || "#"} onClick={(event) => {
+          if (!contactUrl) {
+            event.preventDefault();
+            setNotice("กรุณาติดต่อผู้ดูแลผ่าน LINE Official Account นี้");
+          }
+        }}>
+          ติดต่อ
         </a>
       </nav>
     </main>
   );
 }
 
-// ── QR + Slip upload card ────────────────────────────────────────────────────
-
 function PaymentAndSlipCard(props: {
   result: SelectionResult;
   slipFile: File | null;
+  slipPreviewUrl: string | null;
+  uploadState: UploadState;
   busy: boolean;
   onFile: (file: File | null) => void;
   onUpload: () => void;
   onChangeName: () => void;
 }) {
-  const { result, slipFile, busy, onFile, onUpload, onChangeName } = props;
+  const isVerified = props.result.target.status === "verified";
+  const isPendingReview = props.result.target.status === "manual_review";
+
   return (
     <section className="liffCard qrCard">
-      {/* Amount chip */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-        <span className="badge ok" style={{ fontSize: 13, padding: "5px 12px" }}>
-          {result.event.name}
-        </span>
-      </div>
-
-      <h2>{result.target.display_name}</h2>
-
-      <p style={{
-        margin: 0,
-        fontSize: 22,
-        fontWeight: 800,
-        color: "#514bd5",
-        letterSpacing: "-0.5px"
-      }}>
-        {formatMoney(result.target.amount_due)}
-        <span style={{ fontSize: 14, fontWeight: 700, color: "var(--muted)", marginLeft: 4 }}>บาท</span>
+      <span className="badge ok">{isVerified ? "จ่ายแล้ว" : isPendingReview ? "รอตรวจสอบ" : "สร้าง QR แล้ว"}</span>
+      <h2>{props.result.target.display_name}</h2>
+      <p className="muted">
+        {props.result.event.name} · ยอด {formatMoney(props.result.target.amount_due)} บาท
       </p>
-
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={result.qr.data_url} alt="PromptPay QR Code" />
-
-      <p className="muted">สแกน QR แล้วถ่ายรูปสลิป อัปโหลดด้านล่างนี้</p>
-
-      {result.target.status === "manual_review" ? (
-        <div style={{ textAlign: "center", padding: "12px 0 4px" }}>
+      <img src={props.result.qr.data_url} alt="PromptPay QR Code" />
+      {isVerified ? (
+        <p className="muted">รายการนี้จ่ายเรียบร้อยแล้ว ไม่ต้องส่งสลิปเพิ่ม</p>
+      ) : isPendingReview ? (
+        <div style={{ textAlign: "center", padding: "8px 0" }}>
           <span className="badge warn" style={{ fontSize: 13, padding: "6px 14px" }}>
             ✓ รับสลิปแล้ว — รอตรวจสอบ
           </span>
@@ -593,142 +643,190 @@ function PaymentAndSlipCard(props: {
         </div>
       ) : (
         <>
+          <p className="muted">ถ่ายหน้าจอ QR นี้หรือสแกนจ่าย จากนั้นอัปโหลดสลิปด้านล่าง</p>
           <label className="uploadButton liffUpload">
-            {slipFile ? `📎 ${slipFile.name}` : "เลือกรูปสลิป"}
+            เลือกรูปสลิป
             <input
               type="file"
               accept="image/png,image/jpeg,image/webp"
-              onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+              onChange={(event) => props.onFile(event.target.files?.[0] ?? null)}
             />
           </label>
-
+          {props.slipPreviewUrl ? (
+            <div className={`liffSlipPreview ${props.uploadState.phase}`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={props.slipPreviewUrl} alt="รูปสลิปที่เลือก" />
+              <div>
+                <strong>
+                  {props.uploadState.phase === "done"
+                    ? "อัปโหลดสลิปเสร็จแล้ว"
+                    : props.uploadState.phase === "uploading"
+                      ? "กำลังอัปโหลดสลิป"
+                      : "รูปสลิปที่เลือก"}
+                </strong>
+                {props.slipFile ? <p className="liffFileName">{props.slipFile.name}</p> : null}
+                {props.uploadState.message ? <p>{props.uploadState.message}</p> : null}
+              </div>
+            </div>
+          ) : null}
           <button
             className="btn primary liffPrimary"
-            disabled={!slipFile || busy}
-            onClick={onUpload}
-            style={{ marginTop: 2 }}
+            disabled={!props.slipFile || props.uploadState.phase === "uploading" || props.busy}
+            onClick={props.onUpload}
           >
-            {busy ? (
-              <><span className="liffSpinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> กำลังอัปโหลด</>
-            ) : "อัปโหลดสลิป"}
+            {props.uploadState.phase === "uploading"
+              ? "กำลังอัปโหลด..."
+              : props.uploadState.phase === "done"
+                ? "อัปโหลดเสร็จแล้ว"
+                : "อัปโหลดสลิป"}
           </button>
         </>
       )}
-
-      <button className="btn subtle liffPrimary" onClick={onChangeName}>
-        เปลี่ยนงาน / รายชื่อ
+      <button className="btn subtle liffPrimary" onClick={props.onChangeName}>
+        เปลี่ยนงาน/รายชื่อ
       </button>
     </section>
   );
 }
 
-// ── My payment status view ───────────────────────────────────────────────────
-
 function StatusView(props: {
   payments: MyPayment[];
   busy: boolean;
   onPay: () => void;
-  onUploadSlip: (targetId: string, file: File) => Promise<void>;
+  onUploadSlip: (targetId: string, file: File) => Promise<SlipUploadResponse | null>;
 }) {
   const [files, setFiles] = useState<Record<string, File | null>>({});
-  const visiblePayments = props.payments.filter((p) => p.event);
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [uploadStates, setUploadStates] = useState<Record<string, UploadState>>({});
+  const previewsRef = useRef<Record<string, string>>({});
+  const visiblePayments = props.payments.filter((payment) => payment.event);
+
+  useEffect(() => {
+    previewsRef.current = previews;
+  }, [previews]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(previewsRef.current).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, []);
+
+  function setSlipForPayment(paymentId: string, file: File | null) {
+    setFiles((current) => ({ ...current, [paymentId]: file }));
+    setUploadStates((current) => ({
+      ...current,
+      [paymentId]: file
+        ? { phase: "ready", message: "เลือกรูปสลิปแล้ว กดส่งสลิปเพื่ออัปโหลด" }
+        : { phase: "idle" }
+    }));
+    setPreviews((current) => {
+      if (current[paymentId]) URL.revokeObjectURL(current[paymentId]);
+      if (!file) {
+        const next = { ...current };
+        delete next[paymentId];
+        return next;
+      }
+      return { ...current, [paymentId]: URL.createObjectURL(file) };
+    });
+  }
 
   return (
     <section className="liffCard">
-      {props.busy && visiblePayments.length === 0 ? (
-        <div className="liffLoading" style={{ minHeight: 120 }}>
-          <span className="liffSpinner" />
-          <span style={{ fontSize: 13, color: "var(--muted)" }}>กำลังโหลดสถานะ…</span>
-        </div>
-      ) : visiblePayments.length ? (
+      {visiblePayments.length ? (
         <div className="paymentStatusList">
           {visiblePayments.map((payment) => {
             const latestSlip = payment.slips[0];
             const canUpload = payment.status !== "verified" && payment.status !== "manual_review";
+            const uploadState = uploadStates[payment.id] ?? { phase: "idle" };
             return (
-              <article
-                className="paymentStatusCard"
-                key={payment.id}
-                data-status={payment.status}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-                  <span
-                    className={payment.status === "verified" ? "badge ok" : "badge warn"}
-                    style={{ fontSize: 11 }}
-                  >
-                    {statusText[payment.status] ?? payment.status}
-                  </span>
-                  <strong style={{ fontSize: 14, color: "#514bd5" }}>
-                    {formatMoney(payment.amount_due)} บาท
-                  </strong>
-                </div>
-
-                <h2>{payment.event?.name ?? "ไม่พบชื่องาน"}</h2>
-
-                <div className="statusMeta">
-                  <span>{payment.display_name}</span>
-                  {payment.paid_at ? (
-                    <span style={{ fontSize: 10, color: "var(--muted)" }}>
-                      {new Date(payment.paid_at).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}
-                    </span>
-                  ) : null}
-                </div>
-
-                {latestSlip ? (
-                  <p className="muted">
-                    สลิปล่าสุด: {statusText[latestSlip.status] ?? latestSlip.status} ·{" "}
-                    {new Date(latestSlip.created_at).toLocaleString("th-TH", {
-                      day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"
-                    })}
-                  </p>
-                ) : (
-                  <p className="muted">ยังไม่มีสลิปในระบบ</p>
-                )}
-
-                {canUpload ? (
-                  <div className="statusUpload">
-                    <label className="uploadButton miniUpload">
-                      เลือกสลิป
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp"
-                        onChange={(e) =>
-                          setFiles((cur) => ({
-                            ...cur,
-                            [payment.id]: e.target.files?.[0] ?? null
-                          }))
-                        }
-                      />
-                    </label>
-                    {files[payment.id] ? (
+            <article className="paymentStatusCard" key={payment.id}>
+              <span className={payment.status === "verified" ? "badge ok" : "badge warn"}>
+                {statusText[payment.status] ?? payment.status}
+              </span>
+              <h2>{payment.event?.name ?? "ไม่พบชื่องาน"}</h2>
+              <div className="statusMeta">
+                <span>{payment.display_name}</span>
+                <strong>{formatMoney(payment.amount_due)} บาท</strong>
+              </div>
+              {latestSlip ? (
+                <p className="muted">
+                  สลิปล่าสุด: {statusText[latestSlip.status] ?? latestSlip.status} ·{" "}
+                  {new Date(latestSlip.created_at).toLocaleString("th-TH")}
+                </p>
+              ) : (
+                <p className="muted">ยังไม่มีสลิปในระบบ</p>
+              )}
+              {canUpload ? (
+                <div className="statusUpload">
+                  <label className="uploadButton miniUpload">
+                    เลือกรูปสลิป
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={(event) =>
+                        setSlipForPayment(payment.id, event.target.files?.[0] ?? null)
+                      }
+                    />
+                  </label>
+                  {previews[payment.id] ? (
+                    <div className={`statusSlipPreview ${uploadState.phase}`}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={previews[payment.id]} alt="รูปสลิปที่เลือก" />
                       <span className="fileName">{files[payment.id]?.name}</span>
-                    ) : null}
-                    <button
-                      className="btn primary compactBtn"
-                      disabled={!files[payment.id] || props.busy}
-                      onClick={async () => {
-                        const file = files[payment.id];
-                        if (!file) return;
-                        await props.onUploadSlip(payment.id, file);
-                        setFiles((cur) => ({ ...cur, [payment.id]: null }));
-                      }}
-                    >
-                      {props.busy ? "กำลังส่ง" : "ส่ง"}
-                    </button>
-                  </div>
-                ) : null}
-              </article>
-            );
+                      {uploadState.message ? <small>{uploadState.message}</small> : null}
+                    </div>
+                  ) : files[payment.id] ? (
+                    <span className="fileName">{files[payment.id]?.name}</span>
+                  ) : null}
+                  <button
+                    className="btn primary compactBtn"
+                    disabled={!files[payment.id] || uploadState.phase === "uploading" || props.busy}
+                    onClick={async () => {
+                      const file = files[payment.id];
+                      if (!file) return;
+                      setUploadStates((current) => ({
+                        ...current,
+                        [payment.id]: { phase: "uploading", message: "กำลังอัปโหลดสลิป..." }
+                      }));
+                      try {
+                        const uploaded = await props.onUploadSlip(payment.id, file);
+                        setUploadStates((current) => ({
+                          ...current,
+                          [payment.id]: uploaded
+                            ? {
+                                phase: "done",
+                                message: uploaded.message ?? "อัปโหลดสลิปเสร็จแล้ว รอผู้ดูแลตรวจสอบ"
+                              }
+                            : { phase: "error", message: "อัปโหลดสลิปไม่สำเร็จ กรุณาลองใหม่" }
+                        }));
+                      } catch (error) {
+                        setUploadStates((current) => ({
+                          ...current,
+                          [payment.id]: {
+                            phase: "error",
+                            message: error instanceof Error ? error.message : String(error)
+                          }
+                        }));
+                      }
+                    }}
+                  >
+                    {uploadState.phase === "uploading"
+                      ? "กำลังส่ง..."
+                      : uploadState.phase === "done"
+                        ? "ส่งแล้ว"
+                        : "ส่งสลิป"}
+                  </button>
+                </div>
+              ) : null}
+            </article>
+          );
           })}
         </div>
       ) : (
-        <div className="emptyState">
-          ยังไม่เคยสร้าง QR Code<br />กรุณากดปุ่ม QR เพื่อเลือกงาน
-        </div>
+        <div className="emptyState">ยังไม่เคยสร้าง QR Code กรุณาเลือกงานและรายชื่อก่อน</div>
       )}
-
       <button className="btn primary liffPrimary" onClick={props.onPay}>
-        สร้าง QR Code ใหม่
+        สร้าง QR Code
       </button>
     </section>
   );

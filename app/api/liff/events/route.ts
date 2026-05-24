@@ -11,6 +11,29 @@ export async function GET(request: NextRequest) {
   try {
     await requireLineAccessToken(request);
     const supabase = createServiceClient();
+    const light = request.nextUrl.searchParams.get("light") === "1";
+
+    if (light) {
+      const { data, error } = await supabase
+        .from("events")
+        .select("id,name,slug,promptpay_id,is_open,archived_at")
+        .eq("is_open", true)
+        .is("archived_at", null)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      return NextResponse.json({
+        events: data.map((event) => ({
+          id: event.id,
+          name: event.name,
+          slug: event.slug,
+          has_promptpay: Boolean(event.promptpay_id),
+          targets: []
+        }))
+      });
+    }
+
     const { data, error } = await supabase
       .from("events")
       .select(

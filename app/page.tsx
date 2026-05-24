@@ -14,6 +14,7 @@ import {
   Mail,
   Plus,
   RefreshCw,
+  Settings,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -68,6 +69,21 @@ type LineQuota = {
   error?: string;
 };
 
+type TelegramConnect = {
+  bot?: { username?: string; first_name?: string };
+  startUrl?: string;
+  webhookUrl?: string;
+  chats?: Array<{
+    id: string;
+    chat_id: string;
+    chat_title: string | null;
+    chat_type: string | null;
+    enabled: boolean;
+    last_seen_at: string;
+  }>;
+  hasBotToken?: boolean;
+};
+
 type EventDetail = {
   event: { id: string; name: string; slug: string; expected_total: number };
   targets: Array<{
@@ -79,27 +95,74 @@ type EventDetail = {
   }>;
   slips: Array<{
     id: string;
+    payment_target_id: string | null;
     status: string;
     file_size: number;
+    image_url: string | null;
     storage_path: string | null;
     file_deleted_at: string | null;
+    duplicate_of_slip_id: string | null;
+    replaced_by_slip_id: string | null;
+    rejection_reason: string | null;
     amount_expected: number | null;
     amount_detected: number | null;
+    auto_check_status: string | null;
+    auto_check_reasons: string[] | null;
+    auto_checked_at: string | null;
+    ocr_result: {
+      enabled?: boolean;
+      available?: boolean;
+      confidence?: number | null;
+      amountMatched?: boolean | null;
+      minConfidence?: number;
+      amounts?: number[];
+      selectedAmount?: number | null;
+      text?: string;
+      error?: string;
+    } | null;
     created_at: string;
     payment_targets: { display_name: string } | null;
   }>;
 };
 
 type CleanupMode = "files" | "files_and_metadata" | "event";
+type SlipRow = EventDetail["slips"][number];
+type PreviewSlip = { url: string; slip: SlipRow };
 
 const exampleTargetsText = `สมชาย\t500
 สมหญิง\t500
 มานะ\t500`;
 
+const uniqueTargetsText = `สมชาย
+สมหญิง
+มานะ`;
+
 const cleanupModeLabels: Record<CleanupMode, string> = {
   files: "ลบเฉพาะรูปสลิป",
   files_and_metadata: "ลบรูปและข้อมูลสลิป",
   event: "ปิดงานและล้างข้อมูล"
+};
+
+const autoReasonLabels: Record<string, string> = {
+  auto_verify_disabled: "ยังไม่เปิดตรวจอัตโนมัติ",
+  missing_payment_target: "ไม่มีรายชื่อที่ผูกไว้",
+  missing_slip_qr: "ไม่พบ QR บนสลิป",
+  target_not_found: "ไม่พบรายชื่อ",
+  target_status_verified: "รายชื่อนี้จ่ายแล้ว",
+  target_status_deleted: "รายชื่อนี้ถูกลบแล้ว",
+  target_not_selected_in_liff: "ยังไม่ได้เลือกชื่อผ่าน LIFF",
+  missing_line_user: "ไม่พบ LINE user ของผู้ส่ง",
+  line_user_mismatch: "LINE user ไม่ตรงกับผู้เลือกชื่อ",
+  selection_window_expired: "เกินเวลาหลังสร้าง QR",
+  amount_not_unique_in_event: "ยอดไม่ unique ในงานนี้",
+  ocr_disabled: "ยังไม่ได้เปิด OCR",
+  ocr_unavailable: "OCR ใช้งานไม่ได้",
+  ocr_low_confidence: "OCR ไม่มั่นใจ",
+  ocr_amount_missing: "OCR ไม่พบยอดทศนิยม 2 ตำแหน่ง",
+  ocr_amount_mismatch: "OCR อ่านยอดไม่ตรง",
+  free_auto_review_passed: "ผ่านทุกเงื่อนไข",
+  duplicate_slip_qr: "QR สลิปซ้ำ",
+  duplicate_image_hash: "รูปสลิปซ้ำ"
 };
 
 function percent(used: number, limit: number) {
@@ -118,6 +181,23 @@ function usageBadge(pct: number) {
   if (pct >= 85) return <span className="badge danger">ใกล้เต็มมาก {pct}%</span>;
   if (pct >= 70) return <span className="badge warn">ใกล้เต็ม {pct}%</span>;
   return null;
+}
+
+function settingEnabled(value: string | undefined, defaultValue = false) {
+  if (value === undefined || value === "") return defaultValue;
+  return value === "true" || value === "1" || value === "enabled";
+}
+
+function autoReasonText(reasons: string[] | null | undefined) {
+  if (!reasons?.length) return "-";
+  return reasons.map((reason) => autoReasonLabels[reason] ?? reason).join(", ");
+}
+
+function canReviewSlip(slip: SlipRow) {
+  return (
+    !slip.replaced_by_slip_id &&
+    !["verified", "rejected", "deleted", "duplicate_slip"].includes(slip.status)
+  );
 }
 
 type AuthUser = {
@@ -170,17 +250,24 @@ export default function Home() {
   const [activePage, setActivePage] = useState("overview");
   const [origin, setOrigin] = useState("");
   const [confirmName, setConfirmName] = useState("");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewSlip, setPreviewSlip] = useState<PreviewSlip | null>(null);
   const [createEventOpen, setCreateEventOpen] = useState(false);
   const [newEventName, setNewEventName] = useState("");
   const [newPromptpayId, setNewPromptpayId] = useState("");
   const [newDefaultAmount, setNewDefaultAmount] = useState("");
-  const [newTargetsText, setNewTargetsText] = useState(exampleTargetsText);
+  const [newTargetsText, setNewTargetsText] = useState(uniqueTargetsText);
+  const [newUniqueAmountSuffix, setNewUniqueAmountSuffix] = useState(true);
   const [contactUrl, setContactUrl] = useState("");
   const [linePushPolicy, setLinePushPolicy] = useState("quota_aware");
   const [adminReviewChannel, setAdminReviewChannel] = useState("dashboard_only");
+  const [autoVerifyFromSlipEnabled, setAutoVerifyFromSlipEnabled] = useState(false);
+  const [autoVerifyWindowHours, setAutoVerifyWindowHours] = useState("24");
+  const [autoVerifyRequiresUniqueAmount, setAutoVerifyRequiresUniqueAmount] = useState(true);
+  const [autoVerifyOcrEnabled, setAutoVerifyOcrEnabled] = useState(false);
+  const [autoVerifyOcrMinConfidence, setAutoVerifyOcrMinConfidence] = useState("45");
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramChatId, setTelegramChatId] = useState("");
+  const [telegramConnect, setTelegramConnect] = useState<TelegramConnect | null>(null);
   const [discordWebhookUrl, setDiscordWebhookUrl] = useState("");
   const [adminReviewTokenSecret, setAdminReviewTokenSecret] = useState("");
   const [adminReviewTokenTtlHours, setAdminReviewTokenTtlHours] = useState("24");
@@ -265,11 +352,17 @@ export default function Home() {
       setContactUrl(settings.contact_url ?? "");
       setLinePushPolicy(settings.line_push_policy ?? "quota_aware");
       setAdminReviewChannel(settings.admin_review_channel ?? "dashboard_only");
+      setAutoVerifyFromSlipEnabled(settingEnabled(settings.auto_verify_from_slip_enabled, false));
+      setAutoVerifyWindowHours(settings.auto_verify_window_hours ?? "24");
+      setAutoVerifyRequiresUniqueAmount(settingEnabled(settings.auto_verify_requires_unique_amount, true));
+      setAutoVerifyOcrEnabled(settingEnabled(settings.auto_verify_ocr_enabled, false));
+      setAutoVerifyOcrMinConfidence(settings.auto_verify_ocr_min_confidence ?? "45");
       setTelegramBotToken(settings.telegram_bot_token ?? "");
       setTelegramChatId(settings.telegram_chat_id ?? "");
       setDiscordWebhookUrl(settings.discord_webhook_url ?? "");
       setAdminReviewTokenSecret(settings.admin_review_token_secret ?? "");
       setAdminReviewTokenTtlHours(settings.admin_review_token_ttl_hours ?? "24");
+      void loadTelegramConnect();
       void loadLineQuota();
     } catch {
       // non-critical
@@ -286,6 +379,11 @@ export default function Home() {
           contact_url: contactUrl,
           line_push_policy: linePushPolicy,
           admin_review_channel: adminReviewChannel,
+          auto_verify_from_slip_enabled: String(autoVerifyFromSlipEnabled),
+          auto_verify_window_hours: autoVerifyWindowHours,
+          auto_verify_requires_unique_amount: String(autoVerifyRequiresUniqueAmount),
+          auto_verify_ocr_enabled: String(autoVerifyOcrEnabled),
+          auto_verify_ocr_min_confidence: autoVerifyOcrMinConfidence,
           telegram_bot_token: telegramBotToken,
           telegram_chat_id: telegramChatId,
           discord_webhook_url: discordWebhookUrl,
@@ -294,6 +392,7 @@ export default function Home() {
         })
       });
       setContactUrlSaved(true);
+      await loadTelegramConnect();
       setTimeout(() => setContactUrlSaved(false), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -307,6 +406,45 @@ export default function Home() {
       setLineQuota(await api<LineQuota>("/api/admin/line/quota"));
     } catch {
       // non-critical
+    }
+  }
+
+  async function loadTelegramConnect() {
+    try {
+      setTelegramConnect(await api<TelegramConnect>("/api/admin/telegram/connect"));
+    } catch {
+      // non-critical
+    }
+  }
+
+  async function createTelegramConnectLink() {
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await api<TelegramConnect>("/api/admin/telegram/connect", {
+        method: "POST",
+        body: "{}"
+      });
+      setTelegramConnect(data);
+      setToast("สร้างลิงก์เชื่อม Telegram แล้ว เปิดลิงก์และกด Start ในบอท");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function testTelegram() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/api/admin/telegram/test", { method: "POST", body: "{}" });
+      setToast("ส่งข้อความทดสอบ Telegram แล้ว");
+      await loadTelegramConnect();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -437,12 +575,12 @@ export default function Home() {
     }
   }
 
-  async function openSlip(slipId: string) {
+  async function openSlip(slip: SlipRow) {
     const data = await api<{ signedUrl: string }>(
-      `/api/admin/slips/${slipId}/signed-url`,
+      `/api/admin/slips/${slip.id}/signed-url`,
       { method: "POST", body: "{}" }
     );
-    setPreviewUrl(data.signedUrl);
+    setPreviewSlip({ url: data.signedUrl, slip });
   }
 
   function authenticatedDownload(url: string) {
@@ -495,7 +633,8 @@ export default function Home() {
             name: newEventName,
             promptpay_id: newPromptpayId,
             default_amount: newDefaultAmount,
-            targets_text: newTargetsText
+            targets_text: newTargetsText,
+            unique_amount_suffix: newUniqueAmountSuffix
           })
         }
       );
@@ -503,7 +642,8 @@ export default function Home() {
       setNewEventName("");
       setNewPromptpayId("");
       setNewDefaultAmount("");
-      setNewTargetsText(exampleTargetsText);
+      setNewTargetsText(uniqueTargetsText);
+      setNewUniqueAmountSuffix(true);
       setSelectedEventId(data.event.id);
       setActivePage("events");
       await loadAll(true);
@@ -523,6 +663,22 @@ export default function Home() {
   const totalDue = events.reduce((sum, event) => sum + Number(event.expected_total ?? 0), 0);
   const webhookUrl = `${origin || "https://your-domain.vercel.app"}/api/line/webhook`;
   const liffUrl = `${origin || "https://your-domain.vercel.app"}/liff`;
+  type AdminNavItem = {
+    value: string;
+    label: string;
+    icon: typeof Sparkles;
+    badge?: number | null;
+  };
+  const navItems: AdminNavItem[] = [
+    { value: "overview", label: "ภาพรวม", icon: Sparkles },
+    { value: "events", label: "งานเก็บเงิน", icon: FileSpreadsheet },
+    { value: "targets", label: "รายชื่อ", icon: Users },
+    { value: "slips", label: "สลิป", icon: Bell, badge: pendingReviewTotal || null },
+    { value: "auto", label: "ตรวจอัตโนมัติ", icon: ShieldCheck },
+    { value: "storage", label: "พื้นที่/ล้างข้อมูล", icon: HardDrive },
+    { value: "richmenu", label: "Rich Menu", icon: CheckCircle2 },
+    { value: "line", label: "ตั้งค่า", icon: Settings }
+  ];
   const targetRows =
     detail?.targets.filter((target) => {
       if (targetFilter === "paid") return target.status === "verified";
@@ -530,18 +686,51 @@ export default function Home() {
       if (targetFilter === "unpaid") return target.status !== "verified";
       return true;
     }) ?? [];
-  const slipRows =
-    detail?.slips.filter((slip) => {
-      if (slipFilter === "review") return slip.status === "manual_review";
-      if (slipFilter === "paid") return slip.status === "verified";
-      if (slipFilter === "problem") {
-        return ["amount_mismatch", "duplicate_slip", "rejected"].includes(slip.status);
-      }
-      return true;
-    }) ?? [];
+  const slipGroups = useMemo(() => {
+    const groups = new Map<string, SlipRow[]>();
+    for (const slip of detail?.slips ?? []) {
+      const key = slip.payment_target_id ?? `slip:${slip.id}`;
+      groups.set(key, [...(groups.get(key) ?? []), slip]);
+    }
+
+    return Array.from(groups.entries())
+      .map(([key, slips]) => {
+        const sorted = slips.sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        const primary =
+          sorted.find((slip) => !slip.replaced_by_slip_id && slip.status !== "duplicate_slip") ??
+          sorted[0];
+        const history = sorted.filter((slip) => slip.id !== primary.id);
+        const hasProblem = sorted.some((slip) =>
+          ["amount_mismatch", "duplicate_slip", "rejected"].includes(slip.status)
+        );
+        const hasDuplicate = sorted.some((slip) => slip.status === "duplicate_slip");
+        const hasHistory =
+          sorted.length > 1 || sorted.some((slip) => Boolean(slip.replaced_by_slip_id));
+
+        return {
+          key,
+          primary,
+          history,
+          count: sorted.length,
+          hasProblem,
+          hasDuplicate,
+          hasHistory
+        };
+      })
+      .filter((group) => {
+        if (slipFilter === "review") return group.primary.status === "manual_review";
+        if (slipFilter === "paid") return group.primary.status === "verified";
+        if (slipFilter === "duplicate") return group.hasDuplicate;
+        if (slipFilter === "history") return group.hasHistory;
+        if (slipFilter === "problem") return group.hasProblem;
+        return true;
+      });
+  }, [detail?.slips, slipFilter]);
 
   return (
-    <div className="page">
+    <div className={adminUser ? "page adminAppPage" : "page"}>
       <header className="hero">
         <div className="heroGlow" />
         <div className="brand">
@@ -644,21 +833,19 @@ export default function Home() {
         {adminUser ? (
           <>
         <nav className="pageTabs" aria-label="เมนูหลังบ้าน">
-          {[
-            ["overview", "ภาพรวม"],
-            ["events", "งานเรียกเก็บเงิน"],
-            ["targets", "รายชื่อ"],
-            ["slips", `สลิปรอตรวจ${pendingReviewTotal ? ` (${pendingReviewTotal})` : ""}`],
-            ["storage", "พื้นที่/ล้างข้อมูล"],
-            ["richmenu", "Rich Menu"],
-            ["line", "ตั้งค่า LINE"]
-          ].map(([value, label]) => (
+          <div className="navTitle">
+            <span>Admin</span>
+            <strong>Line Slip</strong>
+          </div>
+          {navItems.map(({ value, label, icon: Icon, badge }) => (
             <button
               key={value}
               className={activePage === value ? "active" : ""}
               onClick={() => setActivePage(value)}
             >
-              {label}
+              <Icon size={17} />
+              <span>{label}</span>
+              {badge ? <b>{badge}</b> : null}
             </button>
           ))}
         </nav>
@@ -686,7 +873,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="grid" hidden={activePage !== "overview" && activePage !== "storage"}>
+        <section className="grid" hidden={activePage !== "overview"}>
           <div className="panel stat accentReview">
             <div className="panelHeader">
               <h2>คิวสลิปรอตรวจ</h2>
@@ -769,7 +956,7 @@ export default function Home() {
               </button>
             </div>
           </div>
-          <div className="tableWrap">
+          <div className="tableWrap desktopOnly">
             <table className="dataTable">
               <thead>
                 <tr>
@@ -839,6 +1026,66 @@ export default function Home() {
               </tbody>
             </table>
           </div>
+          <div className="mobileCardList mobileOnly">
+            {events.map((event) => (
+              <article className="mobileRecordCard" key={event.id}>
+                <div className="mobileRecordHeader">
+                  <div>
+                    <h3>{event.name}</h3>
+                    <p>{event.slug}</p>
+                  </div>
+                  <span className={event.unpaid_count ? "badge warn" : "badge ok"}>
+                    {event.unpaid_count ? "ยังไม่ครบ" : "ครบแล้ว"}
+                  </span>
+                </div>
+                <div className="mobileMetricGrid">
+                  <div>
+                    <span>ยอดรวม</span>
+                    <strong>{formatMoney(event.expected_total)}</strong>
+                  </div>
+                  <div>
+                    <span>จ่ายแล้ว</span>
+                    <strong>{event.paid_count}</strong>
+                  </div>
+                  <div>
+                    <span>ยังไม่จ่าย</span>
+                    <strong>{event.unpaid_count}</strong>
+                  </div>
+                  <div>
+                    <span>สลิป</span>
+                    <strong>{event.slip_count}</strong>
+                  </div>
+                </div>
+                <div className="mobileActionGrid">
+                  <button
+                    className={selectedEventId === event.id ? "btn selected" : "btn subtle"}
+                    onClick={() => selectEvent(event.id)}
+                  >
+                    เปิดงาน
+                  </button>
+                  <button
+                    className="btn subtle"
+                    onClick={() =>
+                      authenticatedDownload(`/api/admin/events/${event.id}/export.csv`)
+                    }
+                  >
+                    ไฟล์สรุป
+                  </button>
+                  <button
+                    className="btn subtle"
+                    onClick={() =>
+                      authenticatedDownload(`/api/admin/events/${event.id}/slips.zip`)
+                    }
+                  >
+                    ดาวน์โหลดสลิป
+                  </button>
+                  <button className="btn danger" onClick={() => setCleanup({ mode: "files", event })}>
+                    ลบรูป
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
         </section>
 
         {selectedEvent && detail ? (
@@ -872,7 +1119,7 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              <div className="tableWrap">
+              <div className="tableWrap desktopOnly">
                 <table className="dataTable compactTable">
                   <thead>
                     <tr>
@@ -895,6 +1142,21 @@ export default function Home() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+              <div className="mobileCardList mobileOnly">
+                {targetRows.map((target) => (
+                  <article className="mobileRecordCard compactMobileCard" key={target.id}>
+                    <div className="mobileRecordHeader">
+                      <div>
+                        <h3>{target.display_name}</h3>
+                        <p>{formatMoney(target.amount_due)} บาท</p>
+                      </div>
+                      <span className={target.status === "verified" ? "badge ok" : "badge warn"}>
+                        {statusLabels[target.status] ?? target.status}
+                      </span>
+                    </div>
+                  </article>
+                ))}
               </div>
               <div className="actions panelActions">
                 <button
@@ -925,7 +1187,7 @@ export default function Home() {
               <div className="panelHeader">
                 <div>
                   <h2>ไฟล์สลิป</h2>
-                  <p className="muted">เปิดดูผ่าน signed URL และจัดการข้อมูลหลังปิดงาน</p>
+                  <p className="muted">ดูรูปสลิปแบบ gallery รวมสลิปล่าสุด สลิปซ้ำ และประวัติของแต่ละรายชื่อ</p>
                 </div>
                 <div className="actions">
                   <button
@@ -956,6 +1218,8 @@ export default function Home() {
                   ["all", "ทั้งหมด"],
                   ["review", "รอตรวจ"],
                   ["paid", "จ่ายแล้ว"],
+                  ["duplicate", "สลิปซ้ำ"],
+                  ["history", "ประวัติ/ถูกแทนที่"],
                   ["problem", "มีปัญหา"]
                 ].map(([value, label]) => (
                   <button
@@ -967,72 +1231,212 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              <div className="tableWrap">
-                <table className="dataTable compactTable">
-                  <thead>
-                    <tr>
-                      <th>ชื่อ</th>
-                      <th>สถานะ</th>
-                      <th>ยอด</th>
-                      <th>ขนาด</th>
-                      <th>วันที่</th>
-                      <th>จัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {slipRows.map((slip) => (
-                      <tr key={slip.id}>
-                        <td>{slip.payment_targets?.display_name ?? "-"}</td>
-                        <td>
-                          <span className={slip.status === "verified" ? "badge ok" : "badge"}>
-                            {statusLabels[slip.status] ?? slip.status}
-                          </span>
-                        </td>
-                        <td>{formatMoney(slip.amount_expected)}</td>
-                        <td>{formatBytes(slip.file_size)}</td>
-                        <td>{new Date(slip.created_at).toLocaleString("th-TH")}</td>
-                        <td>
-                          <div className="actions">
-                            <button
-                              className="btn subtle"
-                              disabled={!slip.storage_path || Boolean(slip.file_deleted_at)}
-                              onClick={() => openSlip(slip.id)}
-                            >
-                              <Eye size={15} />
-                              เปิด
-                            </button>
-                            <button
-                              className="btn subtle"
-                              disabled={!slip.storage_path || Boolean(slip.file_deleted_at)}
-                              onClick={() => authenticatedDownload(`/api/admin/slips/${slip.id}/download`)}
-                            >
-                              <Download size={15} />
-                              โหลด
-                            </button>
-                            <button
-                              className="btn subtle"
-                              disabled={busy || slip.status === "verified"}
-                              onClick={() => updateSlipStatus(slip.id, "verified")}
-                            >
-                              อนุมัติ
-                            </button>
-                            <button
-                              className="btn danger"
-                              disabled={busy || slip.status === "rejected"}
-                              onClick={() => updateSlipStatus(slip.id, "rejected")}
-                            >
-                              ปฏิเสธ
-                            </button>
+              <div className="slipGallery">
+                {slipGroups.map((group) => {
+                  const slip = group.primary;
+                  const canOpen = Boolean(slip.storage_path && !slip.file_deleted_at);
+                  return (
+                    <article className="slipGalleryCard" key={group.key}>
+                      <button
+                        className="slipThumb"
+                        disabled={!canOpen}
+                        onClick={() => openSlip(slip)}
+                        aria-label={`เปิดสลิปของ ${slip.payment_targets?.display_name ?? "ไม่ระบุชื่อ"}`}
+                      >
+                        {slip.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={slip.image_url} alt="รูปสลิป" />
+                        ) : (
+                          <span>{slip.file_deleted_at ? "ลบไฟล์แล้ว" : "ไม่มีรูป"}</span>
+                        )}
+                      </button>
+                      <div className="slipGalleryBody">
+                        <div className="slipGalleryTop">
+                          <div>
+                            <h3>{slip.payment_targets?.display_name ?? "-"}</h3>
+                            <p>{new Date(slip.created_at).toLocaleString("th-TH")}</p>
                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          <span className={slip.status === "verified" ? "badge ok" : "badge"}>
+                            {slip.replaced_by_slip_id
+                              ? "ถูกแทนที่"
+                              : slip.status === "verified" && slip.auto_check_status === "passed"
+                                ? "ผ่านอัตโนมัติ"
+                                : statusLabels[slip.status] ?? slip.status}
+                          </span>
+                        </div>
+                        <div className="slipFacts">
+                          <div>
+                            <span>ยอด</span>
+                            <strong>{formatMoney(slip.amount_expected)}</strong>
+                          </div>
+                          <div>
+                            <span>OCR</span>
+                            <strong>
+                              {slip.amount_detected !== null ? formatMoney(slip.amount_detected) : "-"}
+                            </strong>
+                          </div>
+                          <div>
+                            <span>ไฟล์</span>
+                            <strong>{formatBytes(slip.file_size)}</strong>
+                          </div>
+                        </div>
+                        <p className="muted compactReason">
+                          {slip.auto_check_status ?? "-"} · {autoReasonText(slip.auto_check_reasons)}
+                        </p>
+                        {group.count > 1 ? (
+                          <details className="slipHistory">
+                            <summary>มี {group.count} สลิปในกลุ่มนี้</summary>
+                            <div>
+                              {group.history.map((historySlip) => (
+                                <button
+                                  className="historySlip"
+                                  key={historySlip.id}
+                                  disabled={!historySlip.storage_path || Boolean(historySlip.file_deleted_at)}
+                                  onClick={() => openSlip(historySlip)}
+                                >
+                                  {historySlip.image_url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={historySlip.image_url} alt="ประวัติสลิป" />
+                                  ) : (
+                                    <span />
+                                  )}
+                                  <b>
+                                    {historySlip.replaced_by_slip_id
+                                      ? "ถูกแทนที่"
+                                      : statusLabels[historySlip.status] ?? historySlip.status}
+                                  </b>
+                                  <small>{new Date(historySlip.created_at).toLocaleString("th-TH")}</small>
+                                </button>
+                              ))}
+                            </div>
+                          </details>
+                        ) : null}
+                        <div className="slipActions">
+                          <button className="btn subtle" disabled={!canOpen} onClick={() => openSlip(slip)}>
+                            <Eye size={15} />
+                            เปิด
+                          </button>
+                          <button
+                            className="btn subtle"
+                            disabled={!canOpen}
+                            onClick={() => authenticatedDownload(`/api/admin/slips/${slip.id}/download`)}
+                          >
+                            <Download size={15} />
+                            โหลด
+                          </button>
+                          <button
+                            className="btn subtle"
+                            disabled={busy || !canReviewSlip(slip)}
+                            onClick={() => updateSlipStatus(slip.id, "verified")}
+                          >
+                            อนุมัติ
+                          </button>
+                          <button
+                            className="btn danger"
+                            disabled={busy || !canReviewSlip(slip)}
+                            onClick={() => updateSlipStatus(slip.id, "rejected")}
+                          >
+                            ปฏิเสธ
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+                {!slipGroups.length ? (
+                  <div className="emptyState">
+                    <strong>ยังไม่มีสลิปในตัวกรองนี้</strong>
+                    <p>ลองเปลี่ยนตัวกรองหรือเลือกงานอื่นเพื่อดูสลิป</p>
+                  </div>
+                ) : null}
               </div>
             </div>
           </section>
         ) : null}
+
+        <section className="panel" hidden={activePage !== "auto"}>
+          <div className="panelHeader">
+            <div>
+              <h2>ตรวจสลิปอัตโนมัติจากรูป</h2>
+              <p className="muted">
+                ใช้ OCR อ่านยอดทศนิยม 2 ตำแหน่งร่วมกับ QR บนสลิป, hash กันซ้ำ และเวลาเลือก QR วิธีนี้ไม่ใช่การยืนยันจากธนาคาร
+              </p>
+            </div>
+            <span className={autoVerifyFromSlipEnabled ? "badge ok" : "badge"}>
+              {autoVerifyFromSlipEnabled ? "เปิดโหมดเข้มสุด" : "ปิดอยู่"}
+            </span>
+          </div>
+
+          <div className="warningBand">
+            <AlertTriangle size={18} />
+            <span>
+              Auto verify นี้ตรวจจากหลักฐานในรูปเท่านั้น ถ้าต้องการยืนยันเงินจริง 100% ต้องใช้ statement หรือ bank API
+            </span>
+          </div>
+
+          <div className="formGrid">
+            <label className="checkField">
+              <input
+                type="checkbox"
+                checked={autoVerifyFromSlipEnabled}
+                onChange={(e) => setAutoVerifyFromSlipEnabled(e.target.checked)}
+              />
+              <span>เปิด auto verify จากรูปสลิป</span>
+            </label>
+            <label className="checkField">
+              <input
+                type="checkbox"
+                checked={autoVerifyRequiresUniqueAmount}
+                onChange={(e) => setAutoVerifyRequiresUniqueAmount(e.target.checked)}
+              />
+              <span>ยอดนี้ต้องตรงกับรายชื่อนี้ในงานนี้เท่านั้น</span>
+            </label>
+            <label className="checkField">
+              <input
+                type="checkbox"
+                checked={autoVerifyOcrEnabled}
+                onChange={(e) => setAutoVerifyOcrEnabled(e.target.checked)}
+              />
+              <span>เปิด OCR ฟรีเพื่อเช็กยอดทศนิยม 2 ตำแหน่ง</span>
+            </label>
+            <label className="field">
+              <span>ช่วงเวลาหลังสร้าง QR (ชั่วโมง)</span>
+              <input
+                inputMode="numeric"
+                value={autoVerifyWindowHours}
+                onChange={(e) => setAutoVerifyWindowHours(e.target.value)}
+                placeholder="24"
+              />
+            </label>
+            <label className="field">
+              <span>OCR confidence ขั้นต่ำ</span>
+              <input
+                inputMode="numeric"
+                value={autoVerifyOcrMinConfidence}
+                onChange={(e) => setAutoVerifyOcrMinConfidence(e.target.value)}
+                placeholder="45"
+              />
+            </label>
+          </div>
+
+          <div className="hintBox">
+            <strong>เงื่อนไขที่ต้องผ่านทั้งหมด</strong>
+            <p>
+              ผู้ปกครองเลือกชื่อผ่าน LIFF, target ยังไม่จ่าย, รูปและ QR ไม่ซ้ำ, พบ QR บนสลิป,
+              OCR อ่านยอดตรงแบบสตางค์เป๊ะ, ยอดไม่ซ้ำในงานเดียวกัน และส่งภายในเวลาที่ตั้งไว้
+            </p>
+          </div>
+
+          <div className="actions panelActions">
+            <button
+              className="btn primary"
+              disabled={!adminUser || adminUser.role !== "admin" || busy}
+              onClick={saveSettings}
+            >
+              {contactUrlSaved ? "บันทึกแล้ว ✓" : "บันทึกตั้งค่า"}
+            </button>
+          </div>
+        </section>
 
         <section className="panel" hidden={activePage !== "line"}>
           <div className="panelHeader">
@@ -1109,7 +1513,7 @@ export default function Home() {
                 <input
                   value={telegramChatId}
                   onChange={(e) => setTelegramChatId(e.target.value)}
-                  placeholder="-100xxxxxxxxxx"
+                  placeholder="เชื่อมจากปุ่มด้านล่าง หรือใส่ -100xxxxxxxxxx"
                 />
               </label>
               <label className="field">
@@ -1150,6 +1554,54 @@ export default function Home() {
                       : `เหลือ ${lineQuota.remaining} / ${lineQuota.limit}`}
                 </span>
               ) : null}
+            </div>
+            <div className="hintBox" style={{ marginTop: "1rem" }}>
+              <strong>Telegram Admin Bot</strong>
+              <p>
+                บันทึก Bot Token แล้วกดเชื่อม Telegram ระบบจะตั้ง webhook ให้เอง จากนั้นเปิดบอทและกด Start
+                เพื่อผูกแชทนี้กับหลังบ้าน
+              </p>
+              <div className="actions">
+                <button
+                  className="btn primary"
+                  disabled={!adminUser || adminUser.role !== "admin" || busy || !telegramBotToken}
+                  onClick={createTelegramConnectLink}
+                >
+                  เชื่อม Telegram
+                </button>
+                <button
+                  className="btn subtle"
+                  disabled={!adminUser || adminUser.role !== "admin" || busy}
+                  onClick={testTelegram}
+                >
+                  ทดสอบ Telegram
+                </button>
+                {telegramConnect?.startUrl ? (
+                  <a className="btn subtle" href={telegramConnect.startUrl} target="_blank" rel="noreferrer">
+                    เปิดบอท
+                  </a>
+                ) : null}
+              </div>
+              {telegramConnect?.bot?.username ? (
+                <p className="muted">Bot: @{telegramConnect.bot.username}</p>
+              ) : null}
+              {telegramConnect?.webhookUrl ? (
+                <p className="muted">Webhook: {telegramConnect.webhookUrl}</p>
+              ) : null}
+              {telegramConnect?.chats?.length ? (
+                <div className="miniList">
+                  {telegramConnect.chats.map((chat) => (
+                    <span className="badge neutral" key={chat.id}>
+                      {chat.chat_title || chat.chat_id}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">ยังไม่มี Telegram chat ที่เชื่อมแล้ว</p>
+              )}
+              <p className="muted">
+                หลังเชื่อมแล้ว Telegram จะแสดงปุ่มลัดด้านล่าง: งานทั้งหมด, รอตรวจ, สลิปล่าสุด, ค้างจ่าย, จ่ายแล้ว และช่วยเหลือ
+              </p>
             </div>
           </div>
 
@@ -1263,8 +1715,8 @@ export default function Home() {
               <span className="badge ok">สร้างงานใหม่</span>
               <h3>เพิ่มงานเก็บเงิน</h3>
               <p className="muted">
-                วางรายชื่อจาก Google Sheets หรือ Excel ได้เลย ถ้าแต่ละคนยอดต่างกันให้วางเป็น “ชื่อ + ยอดเงิน”
-                ถ้ายอดเท่ากันทุกคนให้กรอกยอดกลางแล้ววางเฉพาะชื่อ
+                วางรายชื่อจาก Google Sheets หรือ Excel ได้เลย ถ้ายอดเท่ากันทุกคนให้กรอกยอดกลาง
+                แล้วระบบจะเติมเศษสตางค์เฉพาะรายชื่อ เช่น 500.01, 500.02
               </p>
             </div>
 
@@ -1297,19 +1749,31 @@ export default function Home() {
               </label>
             </div>
 
+            <label className="checkField">
+              <input
+                type="checkbox"
+                checked={newUniqueAmountSuffix}
+                onChange={(event) => setNewUniqueAmountSuffix(event.target.checked)}
+              />
+              <span>เติมเศษสตางค์เฉพาะรายชื่อจากยอดกลาง</span>
+            </label>
+
             <label className="field">
               <span>รายชื่อและยอดเงิน</span>
               <textarea
                 rows={8}
                 value={newTargetsText}
                 onChange={(event) => setNewTargetsText(event.target.value)}
-                placeholder={"สมชาย\t500\nสมหญิง\t650\nมานะ\t500"}
+                placeholder={"สมชาย\nสมหญิง\nมานะ"}
               />
             </label>
 
             <div className="hintBox">
               <strong>รูปแบบที่รองรับ</strong>
-              <p>สมชาย 500, สมชาย[TAB]500, หรือวางเฉพาะรายชื่อทีละบรรทัดเมื่อกรอกยอดกลางแล้ว</p>
+              <p>
+                แนะนำวางเฉพาะรายชื่อทีละบรรทัดและกรอกยอดกลาง เช่น 500 เพื่อให้ระบบสร้างยอด 500.01-500.35
+                ส่วนรูปแบบเดิม สมชาย 500 หรือ สมชาย[TAB]500 ยังใช้ได้
+              </p>
             </div>
 
             <div className="actions modalActions">
@@ -1328,10 +1792,47 @@ export default function Home() {
         </div>
       ) : null}
 
-      {previewUrl ? (
-        <div className="modalBackdrop" onClick={() => setPreviewUrl(null)}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="preview" src={previewUrl} alt="ตัวอย่างสลิป" />
+      {previewSlip ? (
+        <div className="modalBackdrop" onClick={() => setPreviewSlip(null)}>
+          <div className="slipPreviewModal" onClick={(event) => event.stopPropagation()}>
+            <div className="slipPreviewHeader">
+              <div>
+                <h3>{previewSlip.slip.payment_targets?.display_name ?? "สลิป"}</h3>
+                <p className="muted">
+                  {formatMoney(previewSlip.slip.amount_expected)} บาท ·{" "}
+                  {statusLabels[previewSlip.slip.status] ?? previewSlip.slip.status}
+                </p>
+              </div>
+              <button className="iconButton" onClick={() => setPreviewSlip(null)} aria-label="ปิดตัวอย่างสลิป">
+                ปิด
+              </button>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img className="preview" src={previewSlip.url} alt="ตัวอย่างสลิป" />
+            <div className="actions modalActions">
+              <button
+                className="btn subtle"
+                onClick={() => authenticatedDownload(`/api/admin/slips/${previewSlip.slip.id}/download`)}
+              >
+                <Download size={15} />
+                ดาวน์โหลด
+              </button>
+              <button
+                className="btn subtle"
+                disabled={busy || !canReviewSlip(previewSlip.slip)}
+                onClick={() => updateSlipStatus(previewSlip.slip.id, "verified")}
+              >
+                อนุมัติ
+              </button>
+              <button
+                className="btn danger"
+                disabled={busy || !canReviewSlip(previewSlip.slip)}
+                onClick={() => updateSlipStatus(previewSlip.slip.id, "rejected")}
+              >
+                ปฏิเสธ
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
