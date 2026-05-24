@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase/server";
-import { downloadLineContent, uploadSlipImage } from "@/lib/slips";
 import {
-  buildCheckStatusFlex,
-  buildSlipStatusFlex,
+  buildNoPaymentStatusFlex,
+  buildPaymentStatusFlex,
+  buildStatusFlexMessage,
   lineMenuMessages,
   liffUri,
   replyLine,
   verifyLineSignature
 } from "@/lib/line";
+import { downloadLineContent, uploadSlipImage } from "@/lib/slips";
+import { createServiceClient } from "@/lib/supabase/server";
 
 type LineEvent = {
   type: string;
@@ -18,11 +19,13 @@ type LineEvent = {
   postback?: { data: string; displayText?: string };
 };
 
-/** ดึงสถานะสลิปล่าสุดของผู้ใช้ แล้วสร้าง reply message (ฟรี — ไม่ใช้ push) */
-async function buildStatusReply(
-  lineUserId: string
-): Promise<unknown[]> {
-  const supabase = createServiceClient();
+async function buildUserStatusMessages(
+  supabase: ReturnType<typeof createServiceClient>,
+  lineUserId?: string
+) {
+  if (!lineUserId) {
+    return [buildNoPaymentStatusFlex(liffUri("pay"))];
+  }
 
   const { data: lineUser } = await supabase
     .from("line_users")
@@ -30,64 +33,62 @@ async function buildStatusReply(
     .eq("line_user_id", lineUserId)
     .maybeSingle();
 
-  if (!lineUser) return [buildCheckStatusFlex(liffUri("me"))];
+  if (!lineUser) {
+    return [buildNoPaymentStatusFlex(liffUri("pay"))];
+  }
 
-  // รายชื่อที่เลือกล่าสุด (ทุกสถานะยกเว้น deleted)
-  const { data: target } = await supabase
+  const { data: targets, error: targetsError } = await supabase
     .from("payment_targets")
-    .select("id,display_name,amount_due,status,paid_at,events(name)")
+    .select("id,display_name,amount_due,status,paid_at,updated_at,events(id,name,is_open,archived_at)")
     .eq("selected_line_user_id", lineUser.id)
     .neq("status", "deleted")
     .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(10);
 
-  if (!target) return [buildCheckStatusFlex(liffUri("me"))];
-
-  const eventRow = Array.isArray(target.events) ? target.events[0] : target.events;
-  const eventName = eventRow?.name ?? "";
-
-  // ถ้า verified ใช้ข้อมูล target โดยตรง
-  if (target.status === "verified") {
-    return [
-      buildSlipStatusFlex({
-        displayName: target.display_name,
-        eventName,
-        amountDue: Number(target.amount_due),
-        status: "verified",
-        submittedAt: null,
-        paidAt: target.paid_at ?? null
-      })
-    ];
+  if (targetsError) throw targetsError;
+  if (!targets?.length) {
+    return [buildNoPaymentStatusFlex(liffUri("pay"))];
   }
 
-  // ดึงสลิปล่าสุดที่ยังไม่ถูกแทนที่ เพื่อหาวันที่ส่งและสถานะล่าสุด
-  const { data: latestSlip } = await supabase
+  const targetIds = targets.map((target) => target.id);
+  const { data: slips, error: slipsError } = await supabase
     .from("slip_submissions")
-    .select("status,created_at")
-    .eq("payment_target_id", target.id)
+    .select("payment_target_id,status,created_at,metadata_deleted_at,replaced_by_slip_id")
+    .in("payment_target_id", targetIds)
     .is("metadata_deleted_at", null)
     .is("replaced_by_slip_id", null)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order("created_at", { ascending: false });
 
-  // กำหนดสถานะที่จะแสดงบนการ์ด
-  const displayStatus =
-    latestSlip?.status === "rejected" ? "rejected"
-    : latestSlip ? "manual_review"
-    : target.status; // pending_slip / unpaid
+  if (slipsError) throw slipsError;
 
-  return [
-    buildSlipStatusFlex({
-      displayName: target.display_name,
-      eventName,
-      amountDue: Number(target.amount_due),
-      status: displayStatus,
-      submittedAt: latestSlip?.created_at ?? null,
-      paidAt: null
-    })
-  ];
+  const bubbles = targets.flatMap((target) => {
+    const eventRow = Array.isArray(target.events) ? target.events[0] : target.events;
+    if (!eventRow || eventRow.archived_at || !eventRow.is_open) return [];
+    const latestSlip = (slips ?? []).find((slip) => slip.payment_target_id === target.id);
+    const displayStatus =
+      target.status === "verified"
+        ? "verified"
+        : latestSlip?.status === "rejected" || latestSlip?.status === "duplicate_slip"
+          ? latestSlip.status
+          : latestSlip
+            ? "manual_review"
+            : target.status;
+
+    return [
+      buildPaymentStatusFlex({
+        displayName: target.display_name,
+        eventName: eventRow.name ?? "",
+        amountDue: Number(target.amount_due),
+        status: displayStatus,
+        paidAt: target.paid_at ?? null,
+        latestSlipAt: latestSlip?.created_at ?? null,
+        liffPayUrl: liffUri("pay"),
+        liffSlipUrl: liffUri("slip")
+      })
+    ];
+  });
+
+  return [bubbles.length ? buildStatusFlexMessage(bubbles) : buildNoPaymentStatusFlex(liffUri("pay"))];
 }
 
 export async function POST(request: NextRequest) {
@@ -122,10 +123,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (event.type === "postback" && event.postback?.data === "action=check_status") {
-      const lineUserId = event.source?.userId;
-      if (lineUserId && event.replyToken) {
-        const messages = await buildStatusReply(lineUserId);
-        await replyLine(event.replyToken, messages);
+      if (event.replyToken) {
+        await replyLine(event.replyToken, await buildUserStatusMessages(supabase, event.source?.userId));
       }
       continue;
     }
@@ -134,15 +133,15 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    // Text trigger จาก liff.sendMessages() หลังส่งสลิป — reply ด้วยการ์ดสถานะ (ฟรี)
     if (
       event.message?.type === "text" &&
-      event.message.text === "ดูสถานะสลิปล่าสุด" &&
-      event.source?.userId &&
-      event.replyToken
+      ["สถานะ", "ดูสถานะ", "ดูสถานะสลิปล่าสุด", "check status"].includes(
+        (event.message.text ?? "").trim().toLowerCase()
+      )
     ) {
-      const messages = await buildStatusReply(event.source.userId);
-      await replyLine(event.replyToken, messages);
+      if (event.replyToken) {
+        await replyLine(event.replyToken, await buildUserStatusMessages(supabase, event.source?.userId));
+      }
       continue;
     }
 
@@ -196,7 +195,6 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      // Rate limit: max 10 slip submissions per LINE user per hour
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       const { count: recentCount } = await supabase
         .from("slip_submissions")

@@ -49,7 +49,6 @@ export async function POST(request: NextRequest) {
         },
         {
           bounds: { x: 0, y: row, width: col, height: H - row },
-          // postback ฟรี (reply) — แสดงการ์ดสถานะในแชทโดยไม่ต้องเปิด LIFF
           action: {
             type: "postback",
             label: "สถานะ",

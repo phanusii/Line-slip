@@ -93,6 +93,10 @@ const statusText: Record<string, string> = {
   deleted: "ลบแล้ว"
 };
 
+function canUploadSlip(status?: string) {
+  return !status || ["unpaid", "pending_slip", "rejected", "amount_mismatch"].includes(status);
+}
+
 declare global {
   interface Window {
     liff?: LiffApi;
@@ -658,11 +662,12 @@ function PaymentAndSlipCard(props: {
   onChangeName: () => void;
 }) {
   const isVerified = props.result.target.status === "verified";
-  const isPendingReview = props.result.target.status === "manual_review";
+  const uploadAllowed = canUploadSlip(props.result.target.status);
+  const currentStatus = props.result.target.status ? statusText[props.result.target.status] ?? props.result.target.status : "สร้าง QR แล้ว";
 
   return (
     <section className="liffCard qrCard">
-      <span className="badge ok">{isVerified ? "จ่ายแล้ว" : isPendingReview ? "รอตรวจสอบ" : "สร้าง QR แล้ว"}</span>
+      <span className={isVerified ? "badge ok" : uploadAllowed ? "badge ok" : "badge warn"}>{currentStatus}</span>
       <h2>{props.result.target.display_name}</h2>
       <p className="muted">
         {props.result.event.name} · ยอด {formatMoney(props.result.target.amount_due)} บาท
@@ -671,15 +676,10 @@ function PaymentAndSlipCard(props: {
       <img src={props.result.qr.data_url} alt="PromptPay QR Code" />
       {isVerified ? (
         <p className="muted">รายการนี้จ่ายเรียบร้อยแล้ว ไม่ต้องส่งสลิปเพิ่ม</p>
-      ) : isPendingReview ? (
-        <div style={{ textAlign: "center", padding: "8px 0" }}>
-          <span className="badge warn" style={{ fontSize: 13, padding: "6px 14px" }}>
-            ✓ รับสลิปแล้ว — รอตรวจสอบ
-          </span>
-          <p className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-            ผู้ดูแลจะตรวจสอบและยืนยันการชำระเงินของคุณเร็วๆ นี้
-          </p>
-        </div>
+      ) : !uploadAllowed ? (
+        <p className="muted">
+          ระบบได้รับสลิปแล้ว สถานะปัจจุบันคือ {currentStatus} ไม่ต้องอัปโหลดสลิปซ้ำ
+        </p>
       ) : (
         <>
           <p className="muted">ถ่ายหน้าจอ QR นี้หรือสแกนจ่าย จากนั้นอัปโหลดสลิปด้านล่าง</p>
@@ -727,7 +727,7 @@ function PaymentAndSlipCard(props: {
           )}
         </>
       )}
-      {(isPendingReview || isVerified) ? (
+      {(!uploadAllowed || isVerified) ? (
         // สำหรับกรณีที่เปิด LIFF มาแล้วสลิปอยู่ในสถานะรอตรวจหรือผ่านแล้ว
         <button className="btn primary liffPrimary" onClick={closeWithStatusCard}>
           {isVerified ? "✅ ดูสถานะในแชท" : "📋 ดูสถานะในแชท"}
@@ -787,7 +787,7 @@ function StatusView(props: {
         <div className="paymentStatusList">
           {visiblePayments.map((payment) => {
             const latestSlip = payment.slips[0];
-            const canUpload = payment.status !== "verified" && payment.status !== "manual_review";
+            const canUpload = canUploadSlip(payment.status);
             const uploadState = uploadStates[payment.id] ?? { phase: "idle" };
             return (
             <article className="paymentStatusCard" key={payment.id}>
@@ -807,6 +807,9 @@ function StatusView(props: {
               ) : (
                 <p className="muted">ยังไม่มีสลิปในระบบ</p>
               )}
+              {!canUpload && payment.status !== "verified" ? (
+                <p className="muted">ระบบได้รับสลิปแล้ว ไม่ต้องอัปโหลดสลิปซ้ำระหว่างรอตรวจ</p>
+              ) : null}
               {canUpload ? (
                 <div className="statusUpload">
                   <label className="uploadButton miniUpload">
