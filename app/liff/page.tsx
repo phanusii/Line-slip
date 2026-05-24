@@ -321,7 +321,8 @@ export default function LiffPaymentPage() {
     setEvents(eventsData.events);
     const firstEventId = eventsData.events[0]?.id ?? "";
     setSelectedEventId(firstEventId);
-    if (firstEventId) await loadTargets(firstEventId, token);
+    // Fire targets fetch in background — targetsLoading spinner handles the wait
+    if (firstEventId) void loadTargets(firstEventId, token);
   }
 
   async function loadTargets(eventId: string, token = accessToken) {

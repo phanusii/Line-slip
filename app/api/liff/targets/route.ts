@@ -1,3 +1,7 @@
+// Edge runtime: ~0 ms cold start vs ~300–800 ms for Node Lambda.
+// This route only uses fetch + Supabase JS (no native binaries).
+export const runtime = "edge";
+
 import { NextRequest, NextResponse } from "next/server";
 import { formatApiError } from "@/lib/api-error";
 import { requireLineAccessToken } from "@/lib/liff";
@@ -15,18 +19,19 @@ export async function GET(request: NextRequest) {
     const supabase = createServiceClient();
     const { data, error } = await supabase
       .from("payment_targets")
-      .select("id,display_name,amount_due,status,selected_line_user_id")
+      .select("id,display_name,amount_due,status,selected_line_user_id,created_at")
       .eq("event_id", eventId)
       .neq("status", "verified")
       .neq("status", "deleted")
-      .order("display_name", { ascending: true })
+      .order("created_at", { ascending: true })
       .limit(500);
 
     if (error) throw error;
 
     return NextResponse.json({
-      targets: (data ?? []).map((target) => ({
+      targets: (data ?? []).map((target, idx) => ({
         id: target.id,
+        order: idx + 1,
         display_name: target.display_name,
         amount_due: Number(target.amount_due),
         status: target.status,
