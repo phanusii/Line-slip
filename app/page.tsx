@@ -160,6 +160,8 @@ const autoReasonLabels: Record<string, string> = {
   ocr_low_confidence: "OCR ไม่มั่นใจ",
   ocr_amount_missing: "OCR ไม่พบยอดทศนิยม 2 ตำแหน่ง",
   ocr_amount_mismatch: "OCR อ่านยอดไม่ตรง",
+  qr_amount_mismatch: "ยอดใน QR ไม่ตรงกับที่คาดไว้",
+  qr_recipient_mismatch: "PromptPay ผู้รับใน QR ไม่ตรงกับงาน",
   free_auto_review_passed: "ผ่านทุกเงื่อนไข",
   duplicate_slip_qr: "QR สลิปซ้ำ",
   duplicate_image_hash: "รูปสลิปซ้ำ"
@@ -265,8 +267,6 @@ export default function Home() {
   const [autoVerifyRequiresUniqueAmount, setAutoVerifyRequiresUniqueAmount] = useState(true);
   const [autoVerifyOcrEnabled, setAutoVerifyOcrEnabled] = useState(false);
   const [autoVerifyOcrMinConfidence, setAutoVerifyOcrMinConfidence] = useState("45");
-  const [slipOcrProvider, setSlipOcrProvider] = useState("free");
-  const [slipOcrApiKey, setSlipOcrApiKey] = useState("");
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramChatId, setTelegramChatId] = useState("");
   const [telegramConnect, setTelegramConnect] = useState<TelegramConnect | null>(null);
@@ -359,8 +359,6 @@ export default function Home() {
       setAutoVerifyRequiresUniqueAmount(settingEnabled(settings.auto_verify_requires_unique_amount, true));
       setAutoVerifyOcrEnabled(settingEnabled(settings.auto_verify_ocr_enabled, false));
       setAutoVerifyOcrMinConfidence(settings.auto_verify_ocr_min_confidence ?? "45");
-      setSlipOcrProvider(settings.slip_ocr_provider ?? "free");
-      setSlipOcrApiKey(settings.slip_ocr_api_key ?? "");
       setTelegramBotToken(settings.telegram_bot_token ?? "");
       setTelegramChatId(settings.telegram_chat_id ?? "");
       setDiscordWebhookUrl(settings.discord_webhook_url ?? "");
@@ -388,8 +386,6 @@ export default function Home() {
           auto_verify_requires_unique_amount: String(autoVerifyRequiresUniqueAmount),
           auto_verify_ocr_enabled: String(autoVerifyOcrEnabled),
           auto_verify_ocr_min_confidence: autoVerifyOcrMinConfidence,
-          slip_ocr_provider: slipOcrProvider,
-          slip_ocr_api_key: slipOcrApiKey,
           telegram_bot_token: telegramBotToken,
           telegram_chat_id: telegramChatId,
           discord_webhook_url: discordWebhookUrl,
@@ -1430,52 +1426,25 @@ export default function Home() {
               />
             </label>
             {autoVerifyOcrEnabled ? (
-              <>
-                <label className="field">
-                  <span>OCR provider</span>
-                  <select value={slipOcrProvider} onChange={(e) => setSlipOcrProvider(e.target.value)}>
-                    <option value="free">ฟรี (Tesseract.js)</option>
-                    <option value="slipok">SlipOK API (แม่นยำกว่า)</option>
-                  </select>
-                </label>
-                {slipOcrProvider === "slipok" ? (
-                  <label className="field">
-                    <span>SlipOK API Key</span>
-                    <input
-                      type="password"
-                      value={slipOcrApiKey}
-                      onChange={(e) => setSlipOcrApiKey(e.target.value)}
-                      placeholder="เว้นว่างถ้าไม่เปลี่ยน"
-                    />
-                  </label>
-                ) : (
-                  <label className="field">
-                    <span>OCR confidence ขั้นต่ำ (0–100)</span>
-                    <input
-                      inputMode="numeric"
-                      value={autoVerifyOcrMinConfidence}
-                      onChange={(e) => setAutoVerifyOcrMinConfidence(e.target.value)}
-                      placeholder="45"
-                    />
-                  </label>
-                )}
-              </>
+              <label className="field">
+                <span>OCR confidence ขั้นต่ำ (0–100)</span>
+                <input
+                  inputMode="numeric"
+                  value={autoVerifyOcrMinConfidence}
+                  onChange={(e) => setAutoVerifyOcrMinConfidence(e.target.value)}
+                  placeholder="45"
+                />
+              </label>
             ) : null}
           </div>
 
           <div className="hintBox">
             <strong>เงื่อนไขที่ต้องผ่านสำหรับ auto-verify</strong>
             <p>✅ ผู้ใช้เลือกชื่อผ่าน LIFF ก่อนส่งสลิป</p>
-            <p>✅ สลิปต้องมี QR code (PromptPay) — QR ต้องไม่ซ้ำกับสลิปที่เคยส่ง</p>
+            <p>✅ สลิปต้องมี QR code — QR ต้องไม่ซ้ำ และยอดใน QR ต้องตรงกับที่คาดไว้</p>
             <p>✅ ส่งสลิปภายใน {autoVerifyWindowHours} ชั่วโมงหลังสร้าง QR</p>
             <p>{autoVerifyRequiresUniqueAmount ? "✅" : "⬜"} ยอดต้องไม่ซ้ำกับรายชื่ออื่นในงาน</p>
-            <p>
-              {autoVerifyOcrEnabled
-                ? slipOcrProvider === "slipok"
-                  ? "✅ SlipOK API ตรวจยอดในรูปสลิป (แม่นยำสูง)"
-                  : "✅ Tesseract OCR ตรวจยอดในรูปสลิป (ฟรี)"
-                : "⬜ ไม่เปิด OCR — ตรวจจาก QR + เงื่อนไขอื่นเท่านั้น"}
-            </p>
+            <p>{autoVerifyOcrEnabled ? "✅ Tesseract OCR ตรวจยอดในรูปด้วย (ฟรี)" : "⬜ ไม่เปิด OCR — ใช้ QR + เงื่อนไขอื่น"}</p>
             <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
               ระบบนี้ตรวจจากหลักฐานในรูปเท่านั้น ไม่ใช่การยืนยันเงินจากธนาคาร
             </p>

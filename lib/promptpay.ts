@@ -1,3 +1,55 @@
+/**
+ * Parse EMV TLV QR payload — ดึงยอดเงิน (field 54) และ PromptPay ID ผู้รับ (field 29.01)
+ * Format: แต่ละ field = ID(2) + Length(2) + Value(Length)
+ *
+ * ใช้ตรวจยอดและผู้รับบนสลิปโดยไม่ต้องใช้ API ภายนอก
+ */
+export function parseEmvQr(payload: string): {
+  amount: number | null;
+  promptpayId: string | null;
+  currency: string | null;
+} {
+  function parseTlv(str: string): Record<string, string> {
+    const fields: Record<string, string> = {};
+    let i = 0;
+    while (i + 4 <= str.length) {
+      const id = str.slice(i, i + 2);
+      const len = parseInt(str.slice(i + 2, i + 4), 10);
+      if (!Number.isFinite(len) || len < 0 || i + 4 + len > str.length) break;
+      fields[id] = str.slice(i + 4, i + 4 + len);
+      i += 4 + len;
+    }
+    return fields;
+  }
+
+  try {
+    const fields = parseTlv(payload);
+
+    // Field 54 = amount (e.g. "500.00")
+    const amountStr = fields["54"];
+    const amount = amountStr ? parseFloat(amountStr) : null;
+
+    // Field 29 = merchant account (nested TLV)
+    // Field 29.01 = PromptPay proxy ID (phone / national ID / e-wallet)
+    let promptpayId: string | null = null;
+    if (fields["29"]) {
+      const sub = parseTlv(fields["29"]);
+      promptpayId = sub["01"] ?? null;
+    }
+
+    // Field 53 = currency (764 = THB)
+    const currency = fields["53"] ?? null;
+
+    return {
+      amount: amount !== null && Number.isFinite(amount) && amount > 0 ? amount : null,
+      promptpayId,
+      currency
+    };
+  } catch {
+    return { amount: null, promptpayId: null, currency: null };
+  }
+}
+
 function field(id: string, value: string) {
   return `${id}${value.length.toString().padStart(2, "0")}${value}`;
 }

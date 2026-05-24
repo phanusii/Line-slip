@@ -14,9 +14,7 @@ export const SETTING_KEYS = [
   "auto_verify_window_hours",
   "auto_verify_requires_unique_amount",
   "auto_verify_ocr_enabled",
-  "auto_verify_ocr_min_confidence",
-  "slip_ocr_provider",
-  "slip_ocr_api_key"
+  "auto_verify_ocr_min_confidence"
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];

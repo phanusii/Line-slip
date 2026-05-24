@@ -1,5 +1,5 @@
+import sharp from "sharp";
 import { getBooleanSetting, getNumberSetting, getSettings } from "@/lib/settings";
-import { runSlipOkOcr } from "@/lib/slipok";
 import { createServiceClient } from "@/lib/supabase/server";
 
 type EvaluateInput = {
@@ -10,6 +10,10 @@ type EvaluateInput = {
   slipRef?: string | null;
   normalizedBuffer: Buffer;
   amountExpected?: number | null;
+  /** ยอดเงินที่ parse ได้จาก QR code บนสลิป (field 54 EMV) */
+  qrAmount?: number | null;
+  /** PromptPay proxy ID ที่ parse ได้จาก QR code บนสลิป (field 29.01 EMV) */
+  qrProxyId?: string | null;
 };
 
 type OcrResult = {
@@ -46,14 +50,47 @@ function clippedText(text: string) {
   return text.replace(/\s+/g, " ").trim().slice(0, 700);
 }
 
+/**
+ * Normalize PromptPay proxy ID เพื่อเปรียบเทียบ
+ * 0812345678, 66812345678, 0066812345678 → "812345678"
+ */
+function normalizeProxyId(id: string) {
+  return id.replace(/\D/g, "").replace(/^(0066|66|0)/, "");
+}
+
+/**
+ * Preprocess รูปสลิปก่อนส่งไป Tesseract OCR
+ * - greyscale: ลด noise สี
+ * - normalize: auto-contrast (ช่วยสลิปมืดหรือสว่างเกิน)
+ * - sharpen: เพิ่มความคมชัดตัวเลข
+ */
+async function preprocessForOcr(buffer: Buffer): Promise<Buffer> {
+  try {
+    return await sharp(buffer, { failOn: "none" })
+      .greyscale()
+      .normalize()
+      .sharpen()
+      .jpeg({ quality: 95 })
+      .toBuffer();
+  } catch {
+    return buffer; // ถ้า preprocess ไม่ได้ ใช้ buffer เดิม
+  }
+}
+
 async function runFreeOcr(
   buffer: Buffer,
   expectedAmount?: number | null,
   minConfidence = 45
 ): Promise<OcrResult> {
   try {
-    const tesseract = await import("tesseract.js");
-    const result = await tesseract.recognize(buffer, "eng");
+    const [tesseract, processedBuffer] = await Promise.all([
+      import("tesseract.js"),
+      preprocessForOcr(buffer)
+    ]);
+    // PSM 11 = sparse text — เหมาะกับสลิปที่ข้อความกระจัดกระจาย
+    const result = await tesseract.recognize(processedBuffer, "eng", {
+      psm: 11
+    } as Parameters<typeof tesseract.recognize>[2]);
     const text = result.data.text ?? "";
     const confidence = Number(result.data.confidence ?? 0);
     const amounts = parseAmounts(text);
@@ -102,17 +139,13 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
     "auto_verify_window_hours",
     "auto_verify_requires_unique_amount",
     "auto_verify_ocr_enabled",
-    "auto_verify_ocr_min_confidence",
-    "slip_ocr_provider",
-    "slip_ocr_api_key"
+    "auto_verify_ocr_min_confidence"
   ]);
   const enabled = getBooleanSetting(settings, "auto_verify_from_slip_enabled", false);
   const windowHours = getNumberSetting(settings, "auto_verify_window_hours", 24);
   const requiresUniqueAmount = getBooleanSetting(settings, "auto_verify_requires_unique_amount", true);
   const ocrEnabled = getBooleanSetting(settings, "auto_verify_ocr_enabled", false);
   const ocrMinConfidence = getNumberSetting(settings, "auto_verify_ocr_min_confidence", 45);
-  const ocrProvider = settings.slip_ocr_provider ?? "free";
-  const ocrApiKey = settings.slip_ocr_api_key ?? "";
 
   // blockingReasons = ปัญหาเชิงโครงสร้าง (user/target/window/QR) → block auto-verify เสมอ
   // ocrReasons = ปัญหา OCR → block ก็ต่อเมื่อ OCR เปิดอยู่เท่านั้น
@@ -136,13 +169,25 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
     return { shouldVerify: false, status: "manual_review", reasons: blockingReasons };
   }
 
-  const { data: target, error: targetError } = await supabase
-    .from("payment_targets")
-    .select("id,event_id,amount_due,status,selected_line_user_id,updated_at")
-    .eq("id", input.paymentTargetId)
-    .maybeSingle();
+  // ดึง payment_target + event.promptpay_id พร้อมกัน
+  const [targetResult, eventResult] = await Promise.all([
+    supabase
+      .from("payment_targets")
+      .select("id,event_id,amount_due,status,selected_line_user_id,updated_at")
+      .eq("id", input.paymentTargetId)
+      .maybeSingle(),
+    supabase
+      .from("events")
+      .select("promptpay_id")
+      .eq("id", input.eventId)
+      .maybeSingle()
+  ]);
 
-  if (targetError) throw targetError;
+  if (targetResult.error) throw targetResult.error;
+  if (eventResult.error) throw eventResult.error;
+
+  const target = targetResult.data;
+  const eventPromptPayId = eventResult.data?.promptpay_id ?? null;
 
   if (!target) {
     blockingReasons.push("target_not_found");
@@ -178,13 +223,32 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
     }
   }
 
+  // === QR verification — ฟรี แม่นยำกว่า OCR ===
+  // ถ้า QR มียอด → ตรวจยอดทันที
+  if (input.qrAmount !== null && input.qrAmount !== undefined) {
+    const qrSatang = toSatang(input.qrAmount);
+    const expectedSatang =
+      typeof input.amountExpected === "number" && Number.isFinite(input.amountExpected)
+        ? toSatang(input.amountExpected)
+        : null;
+    if (expectedSatang !== null && qrSatang !== null && qrSatang !== expectedSatang) {
+      blockingReasons.push("qr_amount_mismatch");
+    }
+  }
+
+  // ถ้า QR มี PromptPay ID → ตรวจว่าตรงกับ PromptPay ของงาน
+  if (input.qrProxyId && eventPromptPayId) {
+    const normalizedQr = normalizeProxyId(input.qrProxyId);
+    const normalizedEvent = normalizeProxyId(eventPromptPayId);
+    if (normalizedQr && normalizedEvent && normalizedQr !== normalizedEvent) {
+      blockingReasons.push("qr_recipient_mismatch");
+    }
+  }
+
   // OCR check — เป็น "soft check" บล็อกก็ต่อเมื่อ ocrEnabled เท่านั้น
   // ถ้า OCR ปิดอยู่ → ระบบยังตรวจอัตโนมัติจาก QR+user+window+uniqueness ได้
   if (ocrEnabled) {
-    ocrResult =
-      ocrProvider === "slipok" && ocrApiKey
-        ? await runSlipOkOcr(input.normalizedBuffer, input.amountExpected, ocrApiKey)
-        : await runFreeOcr(input.normalizedBuffer, input.amountExpected, ocrMinConfidence);
+    ocrResult = await runFreeOcr(input.normalizedBuffer, input.amountExpected, ocrMinConfidence);
 
     if (!ocrResult.available) {
       ocrReasons.push("ocr_unavailable");
@@ -205,7 +269,7 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
       status: "manual_review",
       reasons: allReasons,
       ocrResult,
-      amountDetected: ocrResult?.selectedAmount ?? null
+      amountDetected: ocrResult?.selectedAmount ?? input.qrAmount ?? null
     };
   }
 
@@ -214,6 +278,6 @@ export async function evaluateFreeAutoSlipCheck(input: EvaluateInput): Promise<F
     status: "passed",
     reasons: ["free_auto_review_passed"],
     ocrResult,
-    amountDetected: ocrResult?.selectedAmount ?? null
+    amountDetected: ocrResult?.selectedAmount ?? input.qrAmount ?? null
   };
 }

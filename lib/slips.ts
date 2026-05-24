@@ -5,6 +5,7 @@ import sharp from "sharp";
 import { notifyAdminSlipReview } from "@/lib/admin-review";
 import { STORAGE_BUCKET } from "@/lib/env";
 import { evaluateFreeAutoSlipCheck } from "@/lib/free-auto-slip";
+import { parseEmvQr } from "@/lib/promptpay";
 import { applySlipStatus } from "@/lib/slip-status";
 import { createServiceClient } from "@/lib/supabase/server";
 
@@ -169,6 +170,8 @@ export async function uploadSlipImage(input: UploadSlipInput) {
   const slipRef = slipQrPayload
     ? `qr:${crypto.createHash("sha256").update(slipQrPayload).digest("hex")}`
     : null;
+  // Parse EMV QR payload เพื่อตรวจยอดและผู้รับโดยไม่ใช้ API ภายนอก
+  const parsedQr = slipQrPayload ? parseEmvQr(slipQrPayload) : null;
   const now = new Date();
   const datePart = now.toISOString().replace(/[:.]/g, "-");
   const targetSegment = input.paymentTargetId ?? "no-target";
@@ -272,7 +275,9 @@ export async function uploadSlipImage(input: UploadSlipInput) {
       lineUserDbId: input.lineUserDbId ?? null,
       slipRef,
       normalizedBuffer: normalized,
-      amountExpected: input.amountExpected ?? null
+      amountExpected: input.amountExpected ?? null,
+      qrAmount: parsedQr?.amount ?? null,
+      qrProxyId: parsedQr?.promptpayId ?? null
     });
 
     const autoCheckUpdated = await supabase
