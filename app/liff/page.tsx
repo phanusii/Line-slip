@@ -544,8 +544,7 @@ export default function LiffPaymentPage() {
                           className={selectedTargetId === target.id ? "targetOption active" : "targetOption"}
                           disabled={busy || !selectedEvent.has_promptpay}
                           onClick={() => {
-                            setSelectedTargetId(target.id);
-                            void selectTarget(target.id);
+                            setSelectedTargetId((prev) => prev === target.id ? "" : target.id);
                           }}
                         >
                           <span>
@@ -564,6 +563,27 @@ export default function LiffPaymentPage() {
                       <div className="emptyState">ไม่พบรายชื่อที่ค้นหา</div>
                     )}
                   </div>
+
+                  {selectedTargetId ? (() => {
+                    const t = filteredTargets.find((x) => x.id === selectedTargetId)
+                      ?? selectedEvent?.targets.find((x) => x.id === selectedTargetId);
+                    if (!t) return null;
+                    return (
+                      <div className="confirmPanel">
+                        <p>
+                          <strong>{t.display_name}</strong>
+                          <span> · {formatMoney(t.amount_due)} บาท</span>
+                        </p>
+                        <button
+                          className="btn primary liffPrimary"
+                          disabled={busy || !selectedEvent.has_promptpay}
+                          onClick={() => void selectTarget(selectedTargetId)}
+                        >
+                          {busy ? "กำลังสร้าง QR..." : "ยืนยัน — สร้าง QR Code"}
+                        </button>
+                      </div>
+                    );
+                  })() : null}
                 </>
               ) : (
                 <div className="emptyState">ยังไม่มีงานที่เปิดรับสลิป</div>
@@ -580,6 +600,7 @@ export default function LiffPaymentPage() {
               onUpload={uploadSlip}
               onChangeName={() => {
                 setResult(null);
+                setSelectedTargetId("");
                 setSlipFile(null);
                 setSlipPreviewUrl(null);
                 setUploadState({ phase: "idle" });
