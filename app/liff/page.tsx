@@ -93,8 +93,147 @@ const statusText: Record<string, string> = {
   deleted: "ลบแล้ว"
 };
 
+function statusColor(status: string) {
+  if (status === "verified") return "#16a34a";
+  if (status === "manual_review") return "#2563eb";
+  if (status === "rejected" || status === "amount_mismatch" || status === "duplicate_slip") return "#dc2626";
+  return "#f59e0b";
+}
+
 function canUploadSlip(status?: string) {
   return !status || ["unpaid", "pending_slip", "rejected", "amount_mismatch"].includes(status);
+}
+
+function shouldSendStatusCardToChat() {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("send") === "1";
+}
+
+function liffDeepLink(liffId: string, page: LiffMode) {
+  return liffId ? `https://liff.line.me/${liffId}?page=${page}` : `${window.location.origin}/liff?page=${page}`;
+}
+
+function buildChatStatusBubble(payment: MyPayment, urls: { pay: string; slip: string }) {
+  const latestSlip = payment.slips[0];
+  const displayStatus =
+    payment.status === "verified"
+      ? "verified"
+      : latestSlip?.status === "rejected" || latestSlip?.status === "duplicate_slip"
+        ? latestSlip.status
+        : latestSlip
+          ? "manual_review"
+          : payment.status;
+  const color = statusColor(displayStatus);
+  const canUpload = canUploadSlip(displayStatus);
+  const dateSource = displayStatus === "verified" ? payment.paid_at : latestSlip?.created_at;
+  const dateText = dateSource
+    ? new Date(dateSource).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })
+    : null;
+
+  return {
+    type: "bubble",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: color,
+      paddingAll: "16px",
+      contents: [
+        { type: "text", text: statusText[displayStatus] ?? displayStatus, color: "#ffffff", weight: "bold", size: "lg" }
+      ]
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: [
+        { type: "text", text: payment.display_name, weight: "bold", size: "lg", wrap: true },
+        { type: "text", text: payment.event?.name ?? "ไม่พบชื่องาน", color: "#64748b", size: "sm", wrap: true },
+        { type: "separator", margin: "md" },
+        {
+          type: "box",
+          layout: "horizontal",
+          margin: "md",
+          contents: [
+            { type: "text", text: "ยอดเงิน", flex: 1, color: "#64748b", size: "sm" },
+            { type: "text", text: `${formatMoney(payment.amount_due)} บาท`, flex: 1, align: "end", weight: "bold", size: "sm" }
+          ]
+        },
+        ...(dateText
+          ? [
+              {
+                type: "box",
+                layout: "horizontal",
+                contents: [
+                  { type: "text", text: displayStatus === "verified" ? "อนุมัติเมื่อ" : "ส่งสลิปเมื่อ", flex: 1, color: "#64748b", size: "sm" },
+                  { type: "text", text: dateText, flex: 1, align: "end", color: "#1f2937", size: "sm", wrap: true }
+                ]
+              }
+            ]
+          : []),
+        ...(displayStatus === "manual_review"
+          ? [{ type: "text", text: "ระบบได้รับสลิปแล้ว กรุณารอผู้ดูแลตรวจสอบ", color: "#64748b", size: "xs", wrap: true, margin: "md" }]
+          : [])
+      ]
+    },
+    ...(canUpload
+      ? {
+          footer: {
+            type: "box",
+            layout: "vertical",
+            contents: [
+              {
+                type: "button",
+                style: "primary",
+                color,
+                action: {
+                  type: "uri",
+                  label: displayStatus === "unpaid" ? "สร้าง QR / ส่งสลิป" : "ส่งสลิป",
+                  uri: displayStatus === "unpaid" ? urls.pay : urls.slip
+                }
+              }
+            ]
+          }
+        }
+      : {})
+  };
+}
+
+function buildChatStatusMessage(payments: MyPayment[], urls: { pay: string; slip: string }) {
+  const visiblePayments = payments.filter((payment) => payment.event);
+  const bubbles = visiblePayments.slice(0, 10).map((payment) => buildChatStatusBubble(payment, urls));
+
+  return {
+    type: "flex",
+    altText: "สถานะการชำระเงินล่าสุด",
+    contents: bubbles.length
+      ? bubbles.length === 1
+        ? bubbles[0]
+        : { type: "carousel", contents: bubbles }
+      : {
+          type: "bubble",
+          body: {
+            type: "box",
+            layout: "vertical",
+            spacing: "md",
+            contents: [
+              { type: "text", text: "ยังไม่มีรายการชำระเงิน", weight: "bold", size: "lg", wrap: true },
+              { type: "text", text: "กรุณากดสร้าง QR และเลือกรายชื่อก่อน ระบบจึงจะแสดงสถานะให้ได้", color: "#64748b", size: "sm", wrap: true }
+            ]
+          },
+          footer: {
+            type: "box",
+            layout: "vertical",
+            contents: [
+              {
+                type: "button",
+                style: "primary",
+                color: "#2563eb",
+                action: { type: "uri", label: "สร้าง QR Code", uri: urls.pay }
+              }
+            ]
+          }
+        }
+  };
 }
 
 declare global {
@@ -217,6 +356,7 @@ export default function LiffPaymentPage() {
   const [booting, setBooting] = useState(true);
   const [targetsLoading, setTargetsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [chatStatusSent, setChatStatusSent] = useState(false);
 
   useEffect(() => {
     if (!slipFile) return;
@@ -271,6 +411,30 @@ export default function LiffPaymentPage() {
 
     void boot();
   }, [liffId]);
+
+  useEffect(() => {
+    if (!shouldSendStatusCardToChat()) return;
+    if (mode !== "me" || booting || busy || chatStatusSent || !window.liff) return;
+
+    setChatStatusSent(true);
+    setNotice("กำลังส่งการ์ดสถานะกลับไปที่แชท...");
+    window.liff
+      .sendMessages([
+        buildChatStatusMessage(myPayments, {
+          pay: liffDeepLink(liffId, "pay"),
+          slip: liffDeepLink(liffId, "slip")
+        })
+      ])
+      .then(() => window.liff?.closeWindow())
+      .catch((err) => {
+        setNotice(null);
+        setError(
+          err instanceof Error
+            ? `ส่งการ์ดกลับแชทไม่สำเร็จ: ${err.message}`
+            : "ส่งการ์ดกลับแชทไม่สำเร็จ กรุณาดูสถานะจากหน้านี้"
+        );
+      });
+  }, [mode, booting, busy, chatStatusSent, myPayments, liffId]);
 
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === selectedEventId) ?? events[0],
@@ -602,6 +766,7 @@ export default function LiffPaymentPage() {
               slipPreviewUrl={slipPreviewUrl}
               uploadState={uploadState}
               busy={busy}
+              liffId={liffId}
               onFile={setSlipFile}
               onUpload={uploadSlip}
               onChangeName={() => {
@@ -642,11 +807,34 @@ export default function LiffPaymentPage() {
   );
 }
 
-function closeWithStatusCard() {
-  // ส่ง text trigger ให้ bot reply ด้วยการ์ดสถานะ (ฟรี — ไม่ใช้ push)
-  // แล้วปิด LIFF window
+function paymentFromSelection(result: SelectionResult): MyPayment {
+  return {
+    id: result.target.id,
+    display_name: result.target.display_name,
+    amount_due: result.target.amount_due,
+    status: result.target.status ?? "pending_slip",
+    paid_at: null,
+    event: { id: result.event.id, name: result.event.name, slug: "", is_open: true },
+    slips:
+      result.target.status === "manual_review"
+        ? [
+            {
+              id: result.target.id,
+              status: "manual_review",
+              amount_detected: null,
+              amount_expected: result.target.amount_due,
+              created_at: new Date().toISOString(),
+              file_deleted_at: null
+            }
+          ]
+        : []
+  };
+}
+
+function closeWithStatusCard(message?: Record<string, unknown>) {
+  // ส่งการ์ดสถานะด้วย LIFF โดยตรง ไม่ต้องรอ webhook และไม่ใช้ LINE push quota.
   void window.liff
-    ?.sendMessages([{ type: "text", text: "ดูสถานะสลิปล่าสุด" }])
+    ?.sendMessages(message ? [message] : [{ type: "text", text: "ดูสถานะสลิปล่าสุด" }])
     .catch(() => null)
     .finally(() => window.liff?.closeWindow());
 }
@@ -657,6 +845,7 @@ function PaymentAndSlipCard(props: {
   slipPreviewUrl: string | null;
   uploadState: UploadState;
   busy: boolean;
+  liffId: string;
   onFile: (file: File | null) => void;
   onUpload: () => void;
   onChangeName: () => void;
@@ -664,6 +853,10 @@ function PaymentAndSlipCard(props: {
   const isVerified = props.result.target.status === "verified";
   const uploadAllowed = canUploadSlip(props.result.target.status);
   const currentStatus = props.result.target.status ? statusText[props.result.target.status] ?? props.result.target.status : "สร้าง QR แล้ว";
+  const chatStatusMessage = buildChatStatusMessage([paymentFromSelection(props.result)], {
+    pay: liffDeepLink(props.liffId, "pay"),
+    slip: liffDeepLink(props.liffId, "slip")
+  });
 
   return (
     <section className="liffCard qrCard">
@@ -709,10 +902,10 @@ function PaymentAndSlipCard(props: {
             </div>
           ) : null}
           {props.uploadState.phase === "done" ? (
-            // หลังส่งสลิปสำเร็จ — ปุ่มนี้ส่ง trigger ให้บอทตอบด้วยการ์ดสถานะแล้วปิด LIFF
+            // หลังส่งสลิปสำเร็จ ส่งการ์ดสถานะกลับแชทด้วย LIFF โดยตรง แล้วปิดหน้าต่าง
             <button
               className="btn primary liffPrimary"
-              onClick={closeWithStatusCard}
+              onClick={() => closeWithStatusCard(chatStatusMessage)}
             >
               ✅ รับทราบ — ดูสถานะในแชท
             </button>
@@ -729,7 +922,7 @@ function PaymentAndSlipCard(props: {
       )}
       {(!uploadAllowed || isVerified) ? (
         // สำหรับกรณีที่เปิด LIFF มาแล้วสลิปอยู่ในสถานะรอตรวจหรือผ่านแล้ว
-        <button className="btn primary liffPrimary" onClick={closeWithStatusCard}>
+        <button className="btn primary liffPrimary" onClick={() => closeWithStatusCard(chatStatusMessage)}>
           {isVerified ? "✅ ดูสถานะในแชท" : "📋 ดูสถานะในแชท"}
         </button>
       ) : null}

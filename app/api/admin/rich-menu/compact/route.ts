@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertAdmin, actorFromRequest } from "@/lib/auth";
 import { formatApiError } from "@/lib/api-error";
-import { liffUri } from "@/lib/line";
+import { liffStatusCardUri, liffUri } from "@/lib/line";
 import {
   createRichMenu,
   deleteRichMenu,
@@ -49,12 +49,7 @@ export async function POST(request: NextRequest) {
         },
         {
           bounds: { x: 0, y: row, width: col, height: H - row },
-          action: {
-            type: "postback",
-            label: "สถานะ",
-            data: "action=check_status",
-            displayText: "ดูสถานะการชำระเงิน"
-          }
+          action: { type: "uri", label: "สถานะ", uri: liffStatusCardUri() }
         },
         {
           bounds: { x: col, y: row, width: W - col, height: H - row },

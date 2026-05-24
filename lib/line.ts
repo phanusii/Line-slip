@@ -9,15 +9,22 @@ export function appBaseUrl() {
   throw new Error("ยังไม่ได้ตั้งค่า NEXT_PUBLIC_APP_URL กรุณาเพิ่มตัวแปรนี้ใน environment");
 }
 
-export function liffUri(page?: LiffPage) {
+export function liffUri(page?: LiffPage, extraParams?: Record<string, string>) {
   const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
-  const suffix = page ? `?page=${page}` : "";
+  const params = new URLSearchParams();
+  if (page) params.set("page", page);
+  Object.entries(extraParams ?? {}).forEach(([key, value]) => params.set(key, value));
+  const suffix = params.size ? `?${params.toString()}` : "";
 
   if (liffId) {
     return `https://liff.line.me/${liffId}${suffix}`;
   }
 
   return `${appBaseUrl()}/liff${suffix}`;
+}
+
+export function liffStatusCardUri() {
+  return liffUri("me", { send: "1" });
 }
 
 export function lineMenuMessages(text: string) {
@@ -42,10 +49,9 @@ export function lineMenuMessages(text: string) {
             uri: liffUri("slip")
           },
           {
-            type: "postback",
+            type: "uri",
             label: "สถานะ",
-            data: "action=check_status",
-            displayText: "ดูสถานะ"
+            uri: liffStatusCardUri()
           }
         ]
       }
