@@ -93,8 +93,7 @@ export async function POST(request: NextRequest) {
       amountExpected: Number(target.amount_due),
       sourceBuffer: buffer,
       mimeType: file.type,
-      lineUserDbId: lineUser.id,
-      autoReviewMode: "deferred"
+      lineUserDbId: lineUser.id
     });
 
     return NextResponse.json({
@@ -103,9 +102,7 @@ export async function POST(request: NextRequest) {
       message:
         slip.status === "duplicate_blocked"
           ? "สลิปนี้เคยส่งแล้ว ระบบไม่บันทึกซ้ำ"
-          : slip.status === "verified"
-            ? "ตรวจสลิปผ่านอัตโนมัติจากรูปสลิปแล้ว โปรดทราบว่านี่ไม่ใช่การยืนยันจากธนาคาร"
-          : "รับสลิปใหม่แล้ว ระบบจะใช้ใบล่าสุดให้แอดมินตรวจ"
+          : "รับสลิปแล้ว รอแอดมินตรวจ"
     });
   } catch (error) {
     return NextResponse.json({ error: formatApiError(error) }, { status: 500 });

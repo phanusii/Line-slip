@@ -87,20 +87,6 @@ function normalizeTargets(payload: unknown, defaultAmount: number) {
   });
 }
 
-function money(value: number) {
-  return Math.round(value * 100) / 100;
-}
-
-function applyUniqueAmountSuffix(
-  targets: NormalizedTarget[],
-  _defaultAmount: number,
-  _enabled: boolean
-) {
-  // เศษทศนิยมถูกกำหนดตอนผู้ใช้กดเลือกชื่อใน LIFF (ลำดับจริงตามเวลาที่กด)
-  // ไม่ใช่ตอนสร้างงาน — ดู /api/liff/selection/route.ts
-  return targets;
-}
-
 export async function GET(request: NextRequest) {
   try {
     assertAdmin(request, "viewer");
@@ -157,15 +143,10 @@ export async function POST(request: NextRequest) {
     const name = String(body.name ?? "").trim();
     const promptpayId = String(body.promptpay_id ?? "").trim() || null;
     const defaultAmount = parseAmount(body.default_amount);
-    const uniqueAmountSuffix = body.unique_amount_suffix !== false;
     const targetsText = String(body.targets_text ?? "").trim();
     const fromStructuredTargets = normalizeTargets(body.targets, defaultAmount);
     const fromText = targetsText ? parseTargetsText(targetsText, defaultAmount) : [];
-    const rawTargets = applyUniqueAmountSuffix(
-      fromStructuredTargets.length ? fromStructuredTargets : fromText,
-      defaultAmount,
-      uniqueAmountSuffix
-    );
+    const rawTargets = fromStructuredTargets.length ? fromStructuredTargets : fromText;
 
     if (!name) {
       return NextResponse.json({ error: "กรุณากรอกชื่องานเก็บเงิน" }, { status: 400 });
@@ -250,8 +231,7 @@ export async function POST(request: NextRequest) {
         slug,
         promptpay_id: promptpayId,
         expected_total: expectedTotal,
-        target_count: rawTargets.length,
-        unique_amount_suffix: uniqueAmountSuffix
+        target_count: rawTargets.length
       },
       reason: "สร้างงานเก็บเงินจากแดชบอร์ดผู้ดูแล"
     });

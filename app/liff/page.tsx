@@ -75,14 +75,6 @@ type SlipUploadResponse = {
   alreadyVerified?: boolean;
 };
 
-type SlipReviewResponse = {
-  review: {
-    status: "verified" | "manual_review";
-    autoCheckStatus: string;
-    autoCheckReasons: string[];
-  };
-};
-
 const eventsCacheKey = "line-slip:liff-events:v1";
 
 function targetsCacheKey(eventId: string) {
@@ -435,9 +427,6 @@ export default function LiffPaymentPage() {
           : current
       );
       if (mode === "me") await loadMode("me");
-      if (data.slip?.id && data.slip.status === "manual_review") {
-        void reviewSlipAfterUpload(data.slip.id, targetId);
-      }
       return data;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -450,42 +439,6 @@ export default function LiffPaymentPage() {
           ? { phase: "idle" }
           : current
       );
-    }
-  }
-
-  async function reviewSlipAfterUpload(slipId: string, targetId: string) {
-    if (!accessToken) return;
-    setNotice("อัปโหลดสลิปเสร็จแล้ว กำลังตรวจยอดอัตโนมัติ...");
-    try {
-      const data = await jsonFetch<SlipReviewResponse>("/api/liff/slip/review", {
-        method: "POST",
-        body: JSON.stringify({ accessToken, slipId })
-      });
-      const verified = data.review.status === "verified";
-      setNotice(
-        verified
-          ? "ตรวจสลิปผ่านอัตโนมัติแล้ว"
-          : "รับสลิปแล้ว รอผู้ดูแลตรวจสอบ"
-      );
-      setUploadState((current) =>
-        current.phase === "done"
-          ? {
-              phase: "done",
-              message: verified
-                ? "ตรวจสลิปผ่านอัตโนมัติแล้ว"
-                : "อัปโหลดสลิปเสร็จแล้ว รอผู้ดูแลตรวจสอบ"
-            }
-          : current
-      );
-      setResult((current) =>
-        current?.target.id === targetId
-          ? { ...current, target: { ...current.target, status: verified ? "verified" : "manual_review" } }
-          : current
-      );
-      if (mode === "me") await loadMode("me");
-    } catch (err) {
-      setNotice("อัปโหลดสลิปแล้ว แต่ตรวจอัตโนมัติยังไม่สำเร็จ ผู้ดูแลจะตรวจต่อจาก Dashboard");
-      console.error("LIFF slip auto review failed", err);
     }
   }
 

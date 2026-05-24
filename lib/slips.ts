@@ -3,9 +3,6 @@ import jsQR from "jsqr";
 import sharp from "sharp";
 import { notifyAdminSlipReview } from "@/lib/admin-review";
 import { STORAGE_BUCKET } from "@/lib/env";
-import { evaluateFreeAutoSlipCheck } from "@/lib/free-auto-slip";
-import { parseEmvQr } from "@/lib/promptpay";
-import { applySlipStatus } from "@/lib/slip-status";
 import { createServiceClient } from "@/lib/supabase/server";
 
 type UploadSlipInput = {
@@ -18,22 +15,14 @@ type UploadSlipInput = {
   mimeType?: string | null;
   lineMessageId?: string | null;
   lineUserDbId?: string | null;
-  autoReviewMode?: "sync" | "deferred";
 };
 
 export type UploadSlipResult = {
   id?: string;
-  status: "manual_review" | "duplicate_blocked" | "verified";
+  status: "manual_review" | "duplicate_blocked";
   autoCheckStatus?: string | null;
   autoCheckReasons?: string[];
   duplicateOfId?: string;
-};
-
-type AutoReviewResult = {
-  shouldVerify: boolean;
-  status: "verified" | "manual_review";
-  autoCheckStatus: string;
-  autoCheckReasons: string[];
 };
 
 export async function normalizeSlipImage(source: Buffer) {
@@ -168,123 +157,6 @@ export async function readSlipQrPayload(buffer: Buffer) {
   return decoded.data;
 }
 
-async function runAutoReviewForSlip(input: {
-  slipId: string;
-  eventId: string;
-  paymentTargetId?: string | null;
-  lineUserDbId?: string | null;
-  slipRef?: string | null;
-  normalizedBuffer: Buffer;
-  amountExpected?: number | null;
-  qrAmount?: number | null;
-  qrProxyId?: string | null;
-}): Promise<AutoReviewResult> {
-  const supabase = createServiceClient();
-  const autoCheck = await evaluateFreeAutoSlipCheck({
-    slipId: input.slipId,
-    eventId: input.eventId,
-    paymentTargetId: input.paymentTargetId ?? null,
-    lineUserDbId: input.lineUserDbId ?? null,
-    slipRef: input.slipRef ?? null,
-    normalizedBuffer: input.normalizedBuffer,
-    amountExpected: input.amountExpected ?? null,
-    qrAmount: input.qrAmount ?? null,
-    qrProxyId: input.qrProxyId ?? null
-  });
-
-  const autoCheckUpdated = await supabase
-    .from("slip_submissions")
-    .update({
-      amount_detected: autoCheck.amountDetected ?? null,
-      auto_check_status: autoCheck.status,
-      auto_check_reasons: autoCheck.reasons,
-      auto_checked_at: new Date().toISOString(),
-      ocr_result: autoCheck.ocrResult ?? null
-    })
-    .eq("id", input.slipId);
-
-  if (autoCheckUpdated.error) throw autoCheckUpdated.error;
-
-  if (autoCheck.shouldVerify) {
-    await applySlipStatus({
-      slipId: input.slipId,
-      status: "verified",
-      reason:
-        "ตรวจผ่านอัตโนมัติจากรูปสลิป: QR ไม่ซ้ำ รูปไม่ซ้ำ ยอดเฉพาะรายชื่อ และอยู่ในช่วงเวลาที่กำหนด ไม่ใช่การยืนยันจากธนาคาร",
-      actor: {
-        actor_email: "system-free-auto-review",
-        actor_role: "viewer"
-      },
-      auditAction: "auto_verify_from_slip",
-      source: "free_auto_review"
-    });
-  }
-
-  return {
-    shouldVerify: autoCheck.shouldVerify,
-    status: autoCheck.shouldVerify ? "verified" : "manual_review",
-    autoCheckStatus: autoCheck.status,
-    autoCheckReasons: autoCheck.reasons
-  };
-}
-
-export async function runSlipAutoReviewById(slipId: string): Promise<AutoReviewResult> {
-  const supabase = createServiceClient();
-  const { data: slip, error } = await supabase
-    .from("slip_submissions")
-    .select("*")
-    .eq("id", slipId)
-    .single();
-
-  if (error) throw error;
-  if (slip.status === "verified") {
-    return {
-      shouldVerify: true,
-      status: "verified",
-      autoCheckStatus: slip.auto_check_status ?? "already_verified",
-      autoCheckReasons: slip.auto_check_reasons ?? ["already_verified"]
-    };
-  }
-  if (slip.status !== "manual_review") {
-    return {
-      shouldVerify: false,
-      status: "manual_review",
-      autoCheckStatus: slip.auto_check_status ?? "skipped",
-      autoCheckReasons: [`slip_status_${slip.status}`]
-    };
-  }
-  if (!slip.storage_bucket || !slip.storage_path) {
-    throw new Error("ไม่พบไฟล์สลิปสำหรับตรวจอัตโนมัติ");
-  }
-
-  const downloaded = await supabase.storage.from(slip.storage_bucket).download(slip.storage_path);
-  if (downloaded.error) throw downloaded.error;
-
-  const normalizedBuffer = Buffer.from(await downloaded.data.arrayBuffer());
-  const slipQrPayload = await readSlipQrPayload(normalizedBuffer).catch(() => null);
-  const parsedQr = slipQrPayload ? parseEmvQr(slipQrPayload) : null;
-
-  const result = await runAutoReviewForSlip({
-    slipId: slip.id,
-    eventId: slip.event_id,
-    paymentTargetId: slip.payment_target_id,
-    lineUserDbId: slip.line_user_id,
-    slipRef: slip.slip_ref,
-    normalizedBuffer,
-    amountExpected: slip.amount_expected,
-    qrAmount: parsedQr?.amount ?? null,
-    qrProxyId: parsedQr?.promptpayId ?? null
-  });
-
-  if (!result.shouldVerify) {
-    await notifyAdminSlipReview(slip.id).catch((notifyError) => {
-      console.error("slip review notification failed", notifyError);
-    });
-  }
-
-  return result;
-}
-
 export async function uploadSlipImage(input: UploadSlipInput) {
   const supabase = createServiceClient();
   const normalized = await normalizeSlipImage(input.sourceBuffer);
@@ -293,8 +165,6 @@ export async function uploadSlipImage(input: UploadSlipInput) {
   const slipRef = slipQrPayload
     ? `qr:${crypto.createHash("sha256").update(slipQrPayload).digest("hex")}`
     : null;
-  // Parse EMV QR payload เพื่อตรวจยอดและผู้รับโดยไม่ใช้ API ภายนอก
-  const parsedQr = slipQrPayload ? parseEmvQr(slipQrPayload) : null;
   const now = new Date();
   const datePart = now.toISOString().replace(/[:.]/g, "-");
   const targetSegment = input.paymentTargetId ?? "no-target";
@@ -345,7 +215,10 @@ export async function uploadSlipImage(input: UploadSlipInput) {
       image_hash: imageHash,
       slip_ref: slipRef,
       amount_expected: input.amountExpected ?? null,
-      status: "manual_review"
+      status: "manual_review",
+      auto_check_status: "disabled",
+      auto_check_reasons: ["manual_review_only"],
+      auto_checked_at: new Date().toISOString()
     })
     .select("*")
     .single();
@@ -402,48 +275,15 @@ export async function uploadSlipImage(input: UploadSlipInput) {
       .neq("status", "verified");
   }
 
-  if (input.autoReviewMode === "deferred") {
-    const queued = await supabase
-      .from("slip_submissions")
-      .update({
-        auto_check_status: "queued",
-        auto_check_reasons: ["auto_review_deferred_for_fast_upload"]
-      })
-      .eq("id", inserted.data.id);
-
-    if (queued.error) throw queued.error;
-
-    return {
-      id: inserted.data.id,
-      status: "manual_review",
-      autoCheckStatus: "queued",
-      autoCheckReasons: ["auto_review_deferred_for_fast_upload"]
-    } satisfies UploadSlipResult;
-  }
-
-  const autoReview = await runAutoReviewForSlip({
-    slipId: inserted.data.id,
-    eventId: input.eventId,
-    paymentTargetId: input.paymentTargetId ?? null,
-    lineUserDbId: input.lineUserDbId ?? null,
-    slipRef,
-    normalizedBuffer: normalized,
-    amountExpected: input.amountExpected ?? null,
-    qrAmount: parsedQr?.amount ?? null,
-    qrProxyId: parsedQr?.promptpayId ?? null
+  await notifyAdminSlipReview(inserted.data.id).catch((notifyError) => {
+    console.error("slip review notification failed", notifyError);
   });
-
-  if (!autoReview.shouldVerify) {
-    await notifyAdminSlipReview(inserted.data.id).catch((notifyError) => {
-      console.error("slip review notification failed", notifyError);
-    });
-  }
 
   return {
     id: inserted.data.id,
-    status: autoReview.status,
-    autoCheckStatus: autoReview.autoCheckStatus,
-    autoCheckReasons: autoReview.autoCheckReasons
+    status: "manual_review",
+    autoCheckStatus: "disabled",
+    autoCheckReasons: ["manual_review_only"]
   } satisfies UploadSlipResult;
 }
 

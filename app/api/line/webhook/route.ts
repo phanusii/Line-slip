@@ -269,16 +269,9 @@ export async function POST(request: NextRequest) {
           await replyLine(event.replyToken, [
             { type: "text", text: "❌ สลิปนี้เคยส่งแล้ว ระบบไม่บันทึกซ้ำค่ะ" }
           ]);
-        } else if (slip.status === "verified") {
-          await replyLine(event.replyToken, [
-            {
-              type: "text",
-              text: "✅ ตรวจสลิปผ่านอัตโนมัติจากรูปสลิปแล้วค่ะ หมายเหตุ: เป็นการตรวจจากรูป ไม่ใช่การยืนยันจากธนาคาร"
-            }
-          ]);
         } else {
           await replyLine(event.replyToken, [
-            { type: "text", text: "📋 รับสลิปใหม่แล้วค่ะ ระบบจะใช้ใบล่าสุดให้แอดมินตรวจ" }
+            { type: "text", text: "📋 รับสลิปแล้วค่ะ รอแอดมินตรวจผ่าน Telegram" }
           ]);
         }
       }

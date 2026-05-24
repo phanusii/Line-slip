@@ -144,6 +144,7 @@ const cleanupModeLabels: Record<CleanupMode, string> = {
 
 const autoReasonLabels: Record<string, string> = {
   auto_verify_disabled: "ยังไม่เปิดตรวจอัตโนมัติ",
+  manual_review_only: "ตรวจโดยแอดมินเท่านั้น",
   missing_payment_target: "ไม่มีรายชื่อที่ผูกไว้",
   missing_slip_qr: "ไม่พบ QR บนสลิป",
   target_not_found: "ไม่พบรายชื่อ",
@@ -259,7 +260,6 @@ export default function Home() {
   const [newPromptpayId, setNewPromptpayId] = useState("");
   const [newDefaultAmount, setNewDefaultAmount] = useState("");
   const [newTargetsText, setNewTargetsText] = useState(uniqueTargetsText);
-  const [newUniqueAmountSuffix, setNewUniqueAmountSuffix] = useState(true);
   const [contactUrl, setContactUrl] = useState("");
   const [linePushPolicy, setLinePushPolicy] = useState("disabled");
   const [adminReviewChannel, setAdminReviewChannel] = useState("dashboard_only");
@@ -393,7 +393,7 @@ export default function Home() {
       setContactUrl(settings.contact_url ?? "");
       setLinePushPolicy(settings.line_push_policy ?? "disabled");
       setAdminReviewChannel(settings.admin_review_channel ?? "dashboard_only");
-      setAutoVerifyFromSlipEnabled(settingEnabled(settings.auto_verify_from_slip_enabled, false));
+      setAutoVerifyFromSlipEnabled(false);
       setAutoVerifyWindowHours(settings.auto_verify_window_hours ?? "24");
       setAutoVerifyRequiresUniqueAmount(settingEnabled(settings.auto_verify_requires_unique_amount, true));
       setAutoVerifyOcrEnabled(settingEnabled(settings.auto_verify_ocr_enabled, false));
@@ -420,10 +420,10 @@ export default function Home() {
           contact_url: contactUrl,
           line_push_policy: linePushPolicy,
           admin_review_channel: adminReviewChannel,
-          auto_verify_from_slip_enabled: String(autoVerifyFromSlipEnabled),
+          auto_verify_from_slip_enabled: "false",
           auto_verify_window_hours: autoVerifyWindowHours,
-          auto_verify_requires_unique_amount: String(autoVerifyRequiresUniqueAmount),
-          auto_verify_ocr_enabled: String(autoVerifyOcrEnabled),
+          auto_verify_requires_unique_amount: "false",
+          auto_verify_ocr_enabled: "false",
           auto_verify_ocr_min_confidence: autoVerifyOcrMinConfidence,
           telegram_bot_token: telegramBotToken,
           telegram_chat_id: telegramChatId,
@@ -697,8 +697,7 @@ export default function Home() {
             name: newEventName,
             promptpay_id: newPromptpayId,
             default_amount: newDefaultAmount,
-            targets_text: newTargetsText,
-            unique_amount_suffix: newUniqueAmountSuffix
+            targets_text: newTargetsText
           })
         }
       );
@@ -707,7 +706,6 @@ export default function Home() {
       setNewPromptpayId("");
       setNewDefaultAmount("");
       setNewTargetsText(uniqueTargetsText);
-      setNewUniqueAmountSuffix(true);
       setSelectedEventId(data.event.id);
       setActivePage("events");
       await loadAll(true);
@@ -738,7 +736,6 @@ export default function Home() {
     { value: "events", label: "งานเก็บเงิน", icon: FileSpreadsheet },
     { value: "targets", label: "รายชื่อ", icon: Users },
     { value: "slips", label: "สลิป", icon: Bell, badge: pendingReviewTotal || null },
-    { value: "auto", label: "ตรวจอัตโนมัติ", icon: ShieldCheck },
     { value: "storage", label: "พื้นที่/ล้างข้อมูล", icon: HardDrive },
     { value: "richmenu", label: "Rich Menu", icon: CheckCircle2 },
     { value: "line", label: "ตั้งค่า", icon: Settings }
@@ -1862,8 +1859,7 @@ export default function Home() {
               <h3>เพิ่มงานเก็บเงิน</h3>
               <p className="muted">
                 วางรายชื่อจาก Google Sheets หรือ Excel ได้เลย ถ้ายอดเท่ากันทุกคนให้กรอกยอดกลาง
-                ระบบจะเติมเศษสตางค์ให้อัตโนมัติตอนแต่ละคนกดเลือกชื่อใน LIFF
-                คนแรกที่กดได้ .01 คนที่สองได้ .02 และต่อ ๆ ไป
+                ระบบจะสร้าง QR ด้วยยอดจริงตามที่กรอก และให้แอดมินตรวจสลิปผ่าน Telegram
               </p>
             </div>
 
@@ -1895,15 +1891,6 @@ export default function Home() {
                 />
               </label>
             </div>
-
-            <label className="checkField">
-              <input
-                type="checkbox"
-                checked={newUniqueAmountSuffix}
-                onChange={(event) => setNewUniqueAmountSuffix(event.target.checked)}
-              />
-              <span>เติมเศษสตางค์เมื่อกดเลือกใน LIFF (.01, .02, … ตามลำดับที่กด)</span>
-            </label>
 
             <label className="field">
               <span>รายชื่อและยอดเงิน</span>
