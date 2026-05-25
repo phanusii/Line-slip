@@ -807,20 +807,26 @@ tbody tr:hover {
 
 .slipThumb {
   align-items: center;
-  background: #f3f6fb;
+  background: #eef1f8;
   color: var(--muted);
   cursor: pointer;
   display: flex;
-  flex: 0 0 92px;
+  flex: 0 0 140px;
   font-size: 11px;
   font-weight: 900;
   justify-content: center;
   overflow: hidden;
-  padding: 0;
+  padding: 4px;
   text-align: center;
 }
 
-.slipThumb img,
+.slipThumb img {
+  border-radius: 6px;
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+
 .historySlip img {
   height: 100%;
   object-fit: cover;
@@ -2653,7 +2659,7 @@ tbody tr:hover {
   }
 
   .slipThumb {
-    flex: 0 0 78px;
+    flex: 0 0 110px;
     font-size: 10px;
   }
 
