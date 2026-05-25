@@ -587,7 +587,7 @@ export function buildApprovalVerifiedFlex(opts: {
           { type: "separator", margin: "md" },
           {
             type: "text",
-            text: "ขอบคุณที่ร่วมงานและชำระเงินค่ะ 🙏",
+            text: "ขอบคุณที่ให้ความร่วมมือและชำระเงินค่ะ 🙏",
             color: "#16a34a",
             size: "sm",
             wrap: true,
