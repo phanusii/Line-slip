@@ -232,12 +232,13 @@ export async function POST(request: NextRequest) {
     if (eventError) throw eventError;
 
     const { error: targetsError } = await supabase.from("payment_targets").insert(
-      rawTargets.map((target) => ({
+      rawTargets.map((target, index) => ({
         event_id: event.id,
         display_name: target.display_name,
         amount_due: target.amount_due,
         note: target.note || null,
-        status: "unpaid"
+        status: "unpaid",
+        sort_order: index
       }))
     );
 

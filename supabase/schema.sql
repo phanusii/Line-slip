@@ -33,6 +33,7 @@ create table public.payment_targets (
   amount_due numeric(12, 2) not null,
   note text,
   status public.payment_status not null default 'unpaid',
+  sort_order integer not null default 0,
   selected_line_user_id uuid,
   paid_slip_submission_id uuid,
   paid_at timestamptz,
