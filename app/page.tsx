@@ -251,6 +251,13 @@ export default function Home() {
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [targetFilter, setTargetFilter] = useState("review");
   const [slipFilter, setSlipFilter] = useState("review");
+  const [manualSlipModal, setManualSlipModal] = useState<{
+    id: string;
+    display_name: string;
+    amount_due: number;
+  } | null>(null);
+  const [manualSlipFile, setManualSlipFile] = useState<File | null>(null);
+  const [manualSlipNote, setManualSlipNote] = useState("");
   const [activePage, setActivePage] = useState("overview");
   const [origin, setOrigin] = useState("");
   const [confirmName, setConfirmName] = useState("");
@@ -688,6 +695,32 @@ export default function Home() {
           reason: "ปรับสถานะจากแดชบอร์ดผู้ดูแล"
         })
       });
+      if (selectedEventId) {
+        setDetail(await api<EventDetail>(`/api/admin/events/${selectedEventId}`));
+      }
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitManualSlip() {
+    if (!manualSlipModal) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      if (manualSlipFile) form.append("file", manualSlipFile);
+      if (manualSlipNote) form.append("note", manualSlipNote);
+      await api(`/api/admin/targets/${manualSlipModal.id}/manual-slip`, {
+        method: "POST",
+        body: form
+      });
+      setManualSlipModal(null);
+      setManualSlipFile(null);
+      setManualSlipNote("");
       if (selectedEventId) {
         setDetail(await api<EventDetail>(`/api/admin/events/${selectedEventId}`));
       }
@@ -1235,6 +1268,7 @@ export default function Home() {
                       <th>ชื่อ</th>
                       <th>ยอด</th>
                       <th>สถานะ</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1247,6 +1281,17 @@ export default function Home() {
                           <span className={target.status === "verified" ? "badge ok" : "badge warn"}>
                             {statusLabels[target.status] ?? target.status}
                           </span>
+                        </td>
+                        <td>
+                          {target.status !== "verified" && (
+                            <button
+                              className="btn subtle"
+                              style={{ fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}
+                              onClick={() => setManualSlipModal(target)}
+                            >
+                              + เพิ่มสลิป
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1264,9 +1309,20 @@ export default function Home() {
                         </h3>
                         <p>{formatMoney(target.amount_due)} บาท</p>
                       </div>
-                      <span className={target.status === "verified" ? "badge ok" : "badge warn"}>
-                        {statusLabels[target.status] ?? target.status}
-                      </span>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+                        <span className={target.status === "verified" ? "badge ok" : "badge warn"}>
+                          {statusLabels[target.status] ?? target.status}
+                        </span>
+                        {target.status !== "verified" && (
+                          <button
+                            className="btn subtle"
+                            style={{ fontSize: 12, padding: "4px 10px" }}
+                            onClick={() => setManualSlipModal(target)}
+                          >
+                            + เพิ่มสลิป
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </article>
                 ))}
@@ -2064,6 +2120,56 @@ export default function Home() {
                 onClick={() => updateSlipStatus(previewSlip.slip.id, "rejected")}
               >
                 ปฏิเสธ
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {manualSlipModal ? (
+        <div className="modalBackdrop">
+          <div className="modal">
+            <div>
+              <span className="badge ok">✓ ยืนยันการชำระเงิน</span>
+              <h3>เพิ่มสลิปโดยแอดมิน</h3>
+            </div>
+            <div className="hintBox">
+              <p><strong>{manualSlipModal.display_name}</strong></p>
+              <p>ยอด: <strong style={{ color: "var(--brand)" }}>{formatMoney(manualSlipModal.amount_due)} บาท</strong></p>
+            </div>
+            <label className="field">
+              <span>รูปสลิป <span className="muted">(ไม่บังคับ)</span></span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setManualSlipFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            <label className="field">
+              <span>หมายเหตุ <span className="muted">(ไม่บังคับ)</span></span>
+              <input
+                value={manualSlipNote}
+                onChange={(e) => setManualSlipNote(e.target.value)}
+                placeholder="เช่น รับเงินสดโดยตรง"
+              />
+            </label>
+            <div className="actions">
+              <button
+                className="btn"
+                onClick={() => {
+                  setManualSlipModal(null);
+                  setManualSlipFile(null);
+                  setManualSlipNote("");
+                }}
+              >
+                ยกเลิก
+              </button>
+              <button
+                className="btn ok"
+                disabled={busy}
+                onClick={submitManualSlip}
+              >
+                {busy ? "กำลังบันทึก..." : "✓ ยืนยันชำระแล้ว"}
               </button>
             </div>
           </div>
