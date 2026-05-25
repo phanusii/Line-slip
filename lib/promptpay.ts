@@ -7,6 +7,7 @@
 export function parseEmvQr(payload: string): {
   amount: number | null;
   promptpayId: string | null;
+  promptpayType: PromptPayType | null;
   currency: string | null;
 } {
   function parseTlv(str: string): Record<string, string> {
@@ -30,11 +31,21 @@ export function parseEmvQr(payload: string): {
     const amount = amountStr ? parseFloat(amountStr) : null;
 
     // Field 29 = merchant account (nested TLV)
-    // Field 29.01 = PromptPay proxy ID (phone / national ID / e-wallet)
+    // Field 29.01 = phone, 29.02 = national ID, 29.03 = e-wallet
     let promptpayId: string | null = null;
+    let promptpayType: PromptPayType | null = null;
     if (fields["29"]) {
       const sub = parseTlv(fields["29"]);
-      promptpayId = sub["01"] ?? null;
+      if (sub["01"]) {
+        promptpayId = sub["01"];
+        promptpayType = "phone";
+      } else if (sub["02"]) {
+        promptpayId = sub["02"];
+        promptpayType = "national_id";
+      } else if (sub["03"]) {
+        promptpayId = sub["03"];
+        promptpayType = "ewallet";
+      }
     }
 
     // Field 53 = currency (764 = THB)
@@ -43,10 +54,11 @@ export function parseEmvQr(payload: string): {
     return {
       amount: amount !== null && Number.isFinite(amount) && amount > 0 ? amount : null,
       promptpayId,
+      promptpayType,
       currency
     };
   } catch {
-    return { amount: null, promptpayId: null, currency: null };
+    return { amount: null, promptpayId: null, promptpayType: null, currency: null };
   }
 }
 
@@ -68,31 +80,41 @@ function crc16Ccitt(value: string) {
   return crc.toString(16).toUpperCase().padStart(4, "0");
 }
 
-function normalizePromptPayId(promptpayId: string) {
+export type PromptPayType = "phone" | "national_id" | "ewallet";
+
+function inferPromptPayType(value: string): PromptPayType | null {
+  if (/^0[689]\d{8}$/.test(value)) return "phone";
+  if (/^\d{13}$/.test(value)) return "national_id";
+  if (/^\d{15}$/.test(value)) return "ewallet";
+  return null;
+}
+
+function normalizePromptPayId(promptpayId: string, promptpayType?: PromptPayType | null) {
   const value = promptpayId.replace(/[\s-]/g, "");
+  const type = promptpayType ?? inferPromptPayType(value);
 
-  if (/^0[689]\d{8}$/.test(value)) {
-    return `0066${value.slice(1)}`;
+  if (type === "phone" && /^0[689]\d{8}$/.test(value)) {
+    return { type, proxyId: `0066${value.slice(1)}`, tag: "01" };
   }
 
-  if (/^\d{13}$/.test(value)) {
-    return value;
+  if (type === "national_id" && /^\d{13}$/.test(value)) {
+    return { type, proxyId: value, tag: "02" };
   }
 
-  if (/^\d{15}$/.test(value)) {
-    return value;
+  if (type === "ewallet" && /^\d{15}$/.test(value)) {
+    return { type, proxyId: value, tag: "03" };
   }
 
   throw new Error("PromptPay ID ต้องเป็นเบอร์มือถือไทย, เลขบัตรประชาชน 13 หลัก หรือ e-wallet 15 หลัก");
 }
 
-export function buildPromptPayPayload(promptpayId: string, amount: number) {
+export function buildPromptPayPayload(promptpayId: string, amount: number, promptpayType?: PromptPayType | null) {
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error("ยอดเงินสำหรับ QR Code ไม่ถูกต้อง");
   }
 
-  const proxyId = normalizePromptPayId(promptpayId);
-  const merchantAccount = field("00", "A000000677010111") + field("01", proxyId);
+  const { proxyId, tag } = normalizePromptPayId(promptpayId, promptpayType);
+  const merchantAccount = field("00", "A000000677010111") + field(tag, proxyId);
   const payloadWithoutCrc = [
     field("00", "01"),
     field("01", "12"),

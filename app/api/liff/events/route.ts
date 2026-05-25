@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     if (light) {
       const { data, error } = await supabase
         .from("events")
-        .select("id,name,slug,promptpay_id,is_open,archived_at")
+        .select("id,name,slug,promptpay_id,promptpay_type,is_open,archived_at")
         .eq("is_open", true)
         .is("archived_at", null)
         .order("created_at", { ascending: false });
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("events")
       .select(
-        "id,name,slug,promptpay_id,is_open,archived_at,payment_targets(id,display_name,amount_due,status,selected_line_user_id,created_at)"
+        "id,name,slug,promptpay_id,promptpay_type,is_open,archived_at,payment_targets(id,display_name,amount_due,status,selected_line_user_id,created_at)"
       )
       .eq("is_open", true)
       .is("archived_at", null)

@@ -84,7 +84,7 @@ type TelegramConnect = {
 };
 
 type EventDetail = {
-  event: { id: string; name: string; slug: string; expected_total: number };
+  event: { id: string; name: string; slug: string; expected_total: number; promptpay_id?: string | null; promptpay_type?: string | null };
   targets: Array<{
     id: string;
     display_name: string;
@@ -258,6 +258,7 @@ export default function Home() {
   const [createEventOpen, setCreateEventOpen] = useState(false);
   const [newEventName, setNewEventName] = useState("");
   const [newPromptpayId, setNewPromptpayId] = useState("");
+  const [newPromptpayType, setNewPromptpayType] = useState("phone");
   const [newDefaultAmount, setNewDefaultAmount] = useState("");
   const [newTargetsText, setNewTargetsText] = useState(uniqueTargetsText);
   const [contactUrl, setContactUrl] = useState("");
@@ -709,6 +710,7 @@ export default function Home() {
           body: JSON.stringify({
             name: newEventName,
             promptpay_id: newPromptpayId,
+            promptpay_type: newPromptpayType,
             default_amount: newDefaultAmount,
             targets_text: newTargetsText
           })
@@ -717,6 +719,7 @@ export default function Home() {
       setCreateEventOpen(false);
       setNewEventName("");
       setNewPromptpayId("");
+      setNewPromptpayType("phone");
       setNewDefaultAmount("");
       setNewTargetsText(uniqueTargetsText);
       setSelectedEventId(data.event.id);
@@ -738,6 +741,7 @@ export default function Home() {
   const totalDue = events.reduce((sum, event) => sum + Number(event.expected_total ?? 0), 0);
   const webhookUrl = `${origin || "https://your-domain.vercel.app"}/api/line/webhook`;
   const liffUrl = `${origin || "https://your-domain.vercel.app"}/liff`;
+  const lineChatShareUrl = contactUrl || "https://line.me/ti/p/-_qyIQZ3w0";
   type AdminNavItem = {
     value: string;
     label: string;
@@ -1722,6 +1726,16 @@ export default function Home() {
 
           <div className="lineGrid">
             <div className="setupCard">
+              <span className="setupLabel">ลิงก์ LINE แชทบอร์ดสำหรับผู้ปกครอง</span>
+              <code className="codeBox">{lineChatShareUrl}</code>
+              <button
+                className="btn subtle"
+                onClick={() => navigator.clipboard.writeText(lineChatShareUrl)}
+              >
+                คัดลอกลิงก์ส่งให้ผู้ปกครอง
+              </button>
+            </div>
+            <div className="setupCard">
               <span className="setupLabel">Webhook URL</span>
               <code className="codeBox">{webhookUrl}</code>
               <button
@@ -1889,12 +1903,23 @@ export default function Home() {
 
             <div className="formGrid">
               <label className="field">
-                <span>PromptPay ID / เบอร์รับเงิน</span>
+                <span>ประเภท PromptPay</span>
+                <select value={newPromptpayType} onChange={(event) => setNewPromptpayType(event.target.value)}>
+                  <option value="phone">เบอร์โทรศัพท์</option>
+                  <option value="national_id">เลขบัตรประชาชน</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>{newPromptpayType === "national_id" ? "เลขบัตรประชาชน PromptPay" : "เบอร์โทรศัพท์ PromptPay"}</span>
                 <input
+                  inputMode="numeric"
                   value={newPromptpayId}
                   onChange={(event) => setNewPromptpayId(event.target.value)}
-                  placeholder="เช่น 089xxxxxxx"
+                  placeholder={newPromptpayType === "national_id" ? "เช่น 1234567890123" : "เช่น 089xxxxxxx"}
                 />
+                <small className="hint">
+                  รองรับ PromptPay แบบเบอร์มือถือและเลขบัตรประชาชน ระบบจะสร้าง QR ด้วย tag ที่ตรงประเภท
+                </small>
               </label>
               <label className="field">
                 <span>ยอดกลาง กรณีทุกคนจ่ายเท่ากัน</span>

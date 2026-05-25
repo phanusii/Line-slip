@@ -18,6 +18,7 @@ create table public.events (
   name text not null,
   slug text not null unique,
   promptpay_id text,
+  promptpay_type text not null default 'phone' check (promptpay_type in ('phone', 'national_id', 'ewallet')),
   expected_total numeric(12, 2) not null default 0,
   is_open boolean not null default true,
   archived_at timestamptz,

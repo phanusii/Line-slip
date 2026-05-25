@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     });
 
     richMenuId = richMenu.richMenuId;
-    await uploadRichMenuImage(richMenuId, image, "image/png");
+    await uploadRichMenuImage(richMenuId, image, "image/jpeg");
     await setDefaultRichMenu(richMenuId);
 
     // Delete old menus with same name to avoid accumulation

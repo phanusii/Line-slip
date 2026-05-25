@@ -16,6 +16,23 @@ type NormalizedTarget = {
   amount_from_default: boolean;
 };
 
+const promptpayTypes = new Set(["phone", "national_id", "ewallet"]);
+
+function validatePromptPayId(value: string | null, type: string) {
+  if (!value) return null;
+  const digits = value.replace(/[\s-]/g, "");
+  if (type === "phone" && !/^0[689]\d{8}$/.test(digits)) {
+    return "เบอร์ PromptPay ต้องเป็นเบอร์มือถือไทย 10 หลัก เช่น 089xxxxxxx";
+  }
+  if (type === "national_id" && !/^\d{13}$/.test(digits)) {
+    return "เลขบัตรประชาชน PromptPay ต้องเป็นตัวเลข 13 หลัก";
+  }
+  if (type === "ewallet" && !/^\d{15}$/.test(digits)) {
+    return "e-wallet PromptPay ต้องเป็นตัวเลข 15 หลัก";
+  }
+  return null;
+}
+
 function slugify(value: string) {
   const slug = value
     .trim()
@@ -142,6 +159,9 @@ export async function POST(request: NextRequest) {
 
     const name = String(body.name ?? "").trim();
     const promptpayId = String(body.promptpay_id ?? "").trim() || null;
+    const promptpayType = promptpayTypes.has(String(body.promptpay_type))
+      ? String(body.promptpay_type)
+      : "phone";
     const defaultAmount = parseAmount(body.default_amount);
     const targetsText = String(body.targets_text ?? "").trim();
     const fromStructuredTargets = normalizeTargets(body.targets, defaultAmount);
@@ -150,6 +170,11 @@ export async function POST(request: NextRequest) {
 
     if (!name) {
       return NextResponse.json({ error: "กรุณากรอกชื่องานเก็บเงิน" }, { status: 400 });
+    }
+
+    const promptPayError = validatePromptPayId(promptpayId, promptpayType);
+    if (promptPayError) {
+      return NextResponse.json({ error: promptPayError }, { status: 400 });
     }
 
     if (!rawTargets.length) {
@@ -197,6 +222,7 @@ export async function POST(request: NextRequest) {
         name,
         slug,
         promptpay_id: promptpayId,
+        promptpay_type: promptpayType,
         expected_total: expectedTotal,
         is_open: true
       })
@@ -230,6 +256,7 @@ export async function POST(request: NextRequest) {
         name,
         slug,
         promptpay_id: promptpayId,
+        promptpay_type: promptpayType,
         expected_total: expectedTotal,
         target_count: rawTargets.length
       },

@@ -242,11 +242,21 @@ export async function generateCompactMenuImage(): Promise<Buffer> {
 }
 
 /**
- * Generates a 2500×1686 four-button Rich Menu image.
- * 2×2 grid of frosted-glass cards on a pastel rainbow background,
- * each with a badge circle, Thai title and subtitle.
+ * Loads the custom 2500×1686 four-button Rich Menu artwork.
+ * The image is kept as a compressed JPEG so LINE upload stays small.
  */
 export async function generateFourButtonMenuImage(): Promise<Buffer> {
+  const [{ readFile }, path] = await Promise.all([
+    import("node:fs/promises"),
+    import("node:path")
+  ]);
+  return readFile(path.join(process.cwd(), "public", "rich-menu-4btn.jpg"));
+}
+
+/**
+ * Legacy generated artwork kept for reference while the custom image is used.
+ */
+export async function generateLegacyFourButtonMenuImage(): Promise<Buffer> {
   await ensureFonts();
   const { createCanvas } = await import("@napi-rs/canvas");
 
