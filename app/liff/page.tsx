@@ -683,27 +683,37 @@ export default function LiffPaymentPage() {
                     {targetsLoading && !filteredTargets.length ? (
                       <div className="emptyState">กำลังโหลดรายชื่อ...</div>
                     ) : filteredTargets.length ? (
-                      filteredTargets.map((target) => (
-                        <button
-                          key={target.id}
-                          className={selectedTargetId === target.id ? "targetOption active" : "targetOption"}
-                          disabled={busy || !selectedEvent.has_promptpay}
-                          onClick={() => {
-                            setSelectedTargetId((prev) => prev === target.id ? "" : target.id);
-                          }}
-                        >
-                          <span>
-                            <strong>
-                              <span style={{ color: "var(--muted)", fontWeight: 500, marginRight: 5, fontSize: 12 }}>
-                                {target.order}.
-                              </span>
-                              {target.display_name}
-                            </strong>
-                            <small>{target.is_selected ? "เคยเลือกไว้แล้ว" : statusText[target.status] ?? target.status}</small>
-                          </span>
-                          <b>{formatMoney(target.amount_due)}</b>
-                        </button>
-                      ))
+                      filteredTargets.map((target) => {
+                        const isPaid = target.status === "verified";
+                        const className = [
+                          "targetOption",
+                          selectedTargetId === target.id ? "active" : "",
+                          isPaid ? "paid" : ""
+                        ].filter(Boolean).join(" ");
+
+                        return (
+                          <button
+                            key={target.id}
+                            className={className}
+                            disabled={busy || !selectedEvent.has_promptpay || isPaid}
+                            onClick={() => {
+                              if (isPaid) return;
+                              setSelectedTargetId((prev) => prev === target.id ? "" : target.id);
+                            }}
+                          >
+                            <span>
+                              <strong>
+                                <span style={{ color: "var(--muted)", fontWeight: 500, marginRight: 5, fontSize: 12 }}>
+                                  {target.order}.
+                                </span>
+                                {target.display_name}
+                              </strong>
+                              <small>{isPaid ? "จ่ายแล้ว" : target.is_selected ? "เคยเลือกไว้แล้ว" : statusText[target.status] ?? target.status}</small>
+                            </span>
+                            <b>{formatMoney(target.amount_due)}</b>
+                          </button>
+                        );
+                      })
                     ) : (
                       <div className="emptyState">ไม่พบรายชื่อที่ค้นหา</div>
                     )}

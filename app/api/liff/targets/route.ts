@@ -21,7 +21,6 @@ export async function GET(request: NextRequest) {
       .from("payment_targets")
       .select("id,display_name,amount_due,status,selected_line_user_id,created_at")
       .eq("event_id", eventId)
-      .neq("status", "verified")
       .neq("status", "deleted")
       .order("created_at", { ascending: true })
       .limit(500);

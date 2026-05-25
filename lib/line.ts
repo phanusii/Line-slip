@@ -2,6 +2,17 @@ import crypto from "node:crypto";
 
 export type LiffPage = "pay" | "slip" | "me";
 
+const THAI_TIME_ZONE = "Asia/Bangkok";
+
+export function formatThaiDateTime(value?: string | number | Date | null) {
+  const date = value ? new Date(value) : new Date();
+  return new Intl.DateTimeFormat("th-TH", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: THAI_TIME_ZONE
+  }).format(date);
+}
+
 export function appBaseUrl() {
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
@@ -263,7 +274,7 @@ export function buildApprovalFlexMessage(opts: {
   paidAt: string | null;
 }) {
   const dateStr = opts.paidAt
-    ? new Date(opts.paidAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })
+    ? formatThaiDateTime(opts.paidAt)
     : null;
 
   return {
@@ -371,7 +382,7 @@ export function buildPaymentStatusFlex(opts: {
   const color = statusColor(opts.status);
   const dateSource = opts.status === "verified" ? opts.paidAt : opts.latestSlipAt;
   const dateStr = dateSource
-    ? new Date(dateSource).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })
+    ? formatThaiDateTime(dateSource)
     : null;
   const shouldUpload = ["unpaid", "pending_slip", "rejected", "amount_mismatch"].includes(opts.status);
   const actionUrl = opts.status === "unpaid" ? opts.liffPayUrl : opts.liffSlipUrl;
@@ -503,8 +514,8 @@ export function buildApprovalVerifiedFlex(opts: {
   liffMeUrl: string;
 }) {
   const dateStr = opts.paidAt
-    ? new Date(opts.paidAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })
-    : new Date().toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" });
+    ? formatThaiDateTime(opts.paidAt)
+    : formatThaiDateTime();
 
   return {
     type: "flex",

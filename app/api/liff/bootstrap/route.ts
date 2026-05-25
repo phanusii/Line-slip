@@ -89,7 +89,6 @@ async function getOpenEventsWithFirstTargets(supabase: ReturnType<typeof createS
         .from("payment_targets")
         .select("id,display_name,amount_due,status,selected_line_user_id,created_at")
         .eq("event_id", firstEventId)
-        .neq("status", "verified")
         .neq("status", "deleted")
         .order("created_at", { ascending: true })
         .limit(500)

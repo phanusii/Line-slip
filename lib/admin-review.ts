@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { appBaseUrl } from "@/lib/line";
+import { appBaseUrl, formatThaiDateTime } from "@/lib/line";
 import { getAdminReviewChannel, getSettings, SettingsMap } from "@/lib/settings";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendTelegramSlipReview } from "@/lib/telegram";
@@ -126,7 +126,7 @@ export async function notifyAdminSlipReview(slipId: string) {
     `งาน: ${eventName}`,
     `ชื่อ: ${displayName}`,
     `ยอด: ${amount} บาท`,
-    `เวลา: ${new Date(slip.created_at).toLocaleString("th-TH")}`
+    `เวลา: ${formatThaiDateTime(slip.created_at)}`
   ].join("\n");
 
   try {

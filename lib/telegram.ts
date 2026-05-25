@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { appBaseUrl } from "@/lib/line";
+import { appBaseUrl, formatThaiDateTime } from "@/lib/line";
 import { getSettings, SettingsMap } from "@/lib/settings";
 import { applySlipStatus } from "@/lib/slip-status";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -888,7 +888,7 @@ async function sendSlipsList(
       `งาน: ${eventRow?.name ?? "-"}`,
       `ชื่อ: ${target?.display_name ?? "-"}`,
       `ยอด: ${Number(target?.amount_due ?? slip.amount_expected ?? 0).toLocaleString("th-TH")} บาท`,
-      `เวลา: ${new Date(slip.created_at).toLocaleString("th-TH")}`
+      `เวลา: ${formatThaiDateTime(slip.created_at)}`
     ].join("\n");
 
     let imageUrl: string | null = null;
