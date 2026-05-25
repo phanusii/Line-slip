@@ -753,8 +753,6 @@ export default function Home() {
     { value: "events", label: "งานเก็บเงิน", icon: FileSpreadsheet },
     { value: "targets", label: "รายชื่อ", icon: Users },
     { value: "slips", label: "สลิป", icon: Bell, badge: pendingReviewTotal || null },
-    { value: "storage", label: "พื้นที่/ล้างข้อมูล", icon: HardDrive },
-    { value: "richmenu", label: "Rich Menu", icon: CheckCircle2 },
     { value: "line", label: "ตั้งค่า", icon: Settings }
   ];
   const targetRows =
@@ -1030,7 +1028,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="panel" hidden={activePage !== "events" && activePage !== "storage"}>
+        <section className="panel" hidden={activePage !== "events"}>
           <div className="panelHeader">
             <div>
               <h2>งานเรียกเก็บเงิน</h2>
@@ -1803,9 +1801,7 @@ export default function Home() {
               </p>
             </div>
           </div>
-        </section>
 
-        <section hidden={activePage !== "richmenu"}>
           <RichMenuBuilder
             isAuthenticated={Boolean(adminUser)}
             busy={busy}
@@ -1814,6 +1810,7 @@ export default function Home() {
             origin={origin || "https://line-google-line-line-line-line.vercel.app"}
           />
         </section>
+
           </>
         ) : (
           <section className="panel">
