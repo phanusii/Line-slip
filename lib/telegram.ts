@@ -478,17 +478,44 @@ async function handleTelegramCallback(callback: TelegramCallbackQuery) {
   }
 
   const action = reviewAction.action;
-  await applySlipStatus({
-    slipId: reviewAction.slipId,
-    status: action,
-    reason: action === "verified" ? "อนุมัติจาก Telegram" : "ปฏิเสธจาก Telegram",
-    actor: {
-      actor_email: compactName(callback.from),
-      actor_role: "admin"
-    },
-    auditAction: action === "verified" ? "telegram_review_approved" : "telegram_review_rejected",
-    source: "telegram"
-  });
+
+  try {
+    await applySlipStatus({
+      slipId: reviewAction.slipId,
+      status: action,
+      reason: action === "verified" ? "อนุมัติจาก Telegram" : "ปฏิเสธจาก Telegram",
+      actor: {
+        actor_email: compactName(callback.from),
+        actor_role: "admin"
+      },
+      auditAction: action === "verified" ? "telegram_review_approved" : "telegram_review_rejected",
+      source: "telegram"
+    });
+  } catch (error) {
+    // ลบปุ่มออกแม้จะมี error — กรณีพบบ่อย: สลิปถูกตรวจไปแล้ว
+    if (callback.message?.chat?.id && callback.message.message_id) {
+      await callTelegram(settings, "editMessageReplyMarkup", {
+        chat_id: callback.message.chat.id,
+        message_id: callback.message.message_id,
+        reply_markup: { inline_keyboard: [] }
+      }).catch(() => null);
+    }
+    await callTelegram(settings, "answerCallbackQuery", {
+      callback_query_id: callback.id,
+      text: error instanceof Error ? error.message : "เกิดข้อผิดพลาด",
+      show_alert: true
+    }).catch(() => null);
+    return;
+  }
+
+  // ลบปุ่มออกจากข้อความสลิปเดิม — ป้องกันการกดอนุมัติ/ปฏิเสธซ้ำ
+  if (callback.message?.chat?.id && callback.message.message_id) {
+    await callTelegram(settings, "editMessageReplyMarkup", {
+      chat_id: callback.message.chat.id,
+      message_id: callback.message.message_id,
+      reply_markup: { inline_keyboard: [] }
+    }).catch(() => null);
+  }
 
   const text = action === "verified" ? "อนุมัติสลิปแล้ว" : "ปฏิเสธสลิปแล้ว";
   await callTelegram(settings, "answerCallbackQuery", {
@@ -496,7 +523,7 @@ async function handleTelegramCallback(callback: TelegramCallbackQuery) {
     text
   }).catch(() => null);
 
-  if (callback.message?.chat?.id && callback.message.message_id) {
+  if (callback.message?.chat?.id) {
     await callTelegram(settings, "sendMessage", {
       chat_id: callback.message.chat.id,
       text: `${text} โดย ${compactName(callback.from)}`
