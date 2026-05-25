@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { appBaseUrl, formatThaiDateTime } from "@/lib/line";
+import { appBaseUrl, formatThaiDateTime, getLineMessageQuota } from "@/lib/line";
 import { getSettings, SettingsMap } from "@/lib/settings";
 import { applySlipStatus } from "@/lib/slip-status";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -508,14 +508,17 @@ async function handleTelegramCallback(callback: TelegramCallbackQuery) {
     return;
   }
 
-  // ลบปุ่มออกจากข้อความสลิปเดิม — ป้องกันการกดอนุมัติ/ปฏิเสธซ้ำ
-  if (callback.message?.chat?.id && callback.message.message_id) {
-    await callTelegram(settings, "editMessageReplyMarkup", {
-      chat_id: callback.message.chat.id,
-      message_id: callback.message.message_id,
-      reply_markup: { inline_keyboard: [] }
-    }).catch(() => null);
-  }
+  // ลบปุ่มออกจากข้อความสลิปเดิม + ดึงโควตา LINE พร้อมกัน
+  const [, quota] = await Promise.all([
+    callback.message?.chat?.id && callback.message.message_id
+      ? callTelegram(settings, "editMessageReplyMarkup", {
+          chat_id: callback.message.chat.id,
+          message_id: callback.message.message_id,
+          reply_markup: { inline_keyboard: [] }
+        }).catch(() => null)
+      : Promise.resolve(null),
+    getLineMessageQuota().catch(() => null)
+  ]);
 
   const text = action === "verified" ? "อนุมัติสลิปแล้ว" : "ปฏิเสธสลิปแล้ว";
   await callTelegram(settings, "answerCallbackQuery", {
@@ -524,9 +527,15 @@ async function handleTelegramCallback(callback: TelegramCallbackQuery) {
   }).catch(() => null);
 
   if (callback.message?.chat?.id) {
+    const quotaLine = quota
+      ? quota.type === "none"
+        ? `📨 โควตา LINE: ไม่จำกัด (ใช้แล้ว ${quota.used.toLocaleString("th-TH")})`
+        : `📨 โควตา LINE: เหลือ ${Number(quota.remaining ?? 0).toLocaleString("th-TH")}/${Number(quota.limit ?? 0).toLocaleString("th-TH")} ข้อความ (ใช้แล้ว ${quota.used.toLocaleString("th-TH")})`
+      : null;
+    const lines = [`${text} โดย ${compactName(callback.from)}`, quotaLine].filter(Boolean);
     await callTelegram(settings, "sendMessage", {
       chat_id: callback.message.chat.id,
-      text: `${text} โดย ${compactName(callback.from)}`
+      text: lines.join("\n")
     }).catch(() => null);
   }
 }
