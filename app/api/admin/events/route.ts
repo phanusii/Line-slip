@@ -238,7 +238,7 @@ export async function POST(request: NextRequest) {
         amount_due: target.amount_due,
         note: target.note || null,
         status: "unpaid",
-        sort_order: index
+        sort_order: index + 1
       }))
     );
 
