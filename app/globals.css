@@ -490,6 +490,25 @@ tbody tr:hover {
   color: #514bd5;
 }
 
+.filterCount {
+  background: rgba(80, 80, 120, 0.12);
+  border-radius: 20px;
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  margin-left: 4px;
+  min-width: 18px;
+  padding: 2px 5px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.segmented button.active .filterCount {
+  background: rgba(81, 75, 213, 0.14);
+  color: #514bd5;
+}
+
 .btn,
 .iconButton {
   align-items: center;

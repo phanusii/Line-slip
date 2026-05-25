@@ -764,48 +764,62 @@ export default function Home() {
       if (targetFilter === "unpaid") return target.status !== "verified";
       return true;
     }) ?? [];
-  const slipGroups = useMemo(() => {
+  const allSlipGroups = useMemo(() => {
     const groups = new Map<string, SlipRow[]>();
     for (const slip of detail?.slips ?? []) {
       const key = slip.payment_target_id ?? `slip:${slip.id}`;
       groups.set(key, [...(groups.get(key) ?? []), slip]);
     }
+    return Array.from(groups.entries()).map(([key, slips]) => {
+      const sorted = slips.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      const primary =
+        sorted.find((slip) => !slip.replaced_by_slip_id && slip.status !== "duplicate_slip") ??
+        sorted[0];
+      const history = sorted.filter((slip) => slip.id !== primary.id);
+      const hasProblem = sorted.some((slip) =>
+        ["amount_mismatch", "duplicate_slip", "rejected"].includes(slip.status)
+      );
+      const hasDuplicate = sorted.some((slip) => slip.status === "duplicate_slip");
+      const hasHistory =
+        sorted.length > 1 || sorted.some((slip) => Boolean(slip.replaced_by_slip_id));
+      return { key, primary, history, count: sorted.length, hasProblem, hasDuplicate, hasHistory };
+    });
+  }, [detail?.slips]);
 
-    return Array.from(groups.entries())
-      .map(([key, slips]) => {
-        const sorted = slips.sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-        const primary =
-          sorted.find((slip) => !slip.replaced_by_slip_id && slip.status !== "duplicate_slip") ??
-          sorted[0];
-        const history = sorted.filter((slip) => slip.id !== primary.id);
-        const hasProblem = sorted.some((slip) =>
-          ["amount_mismatch", "duplicate_slip", "rejected"].includes(slip.status)
-        );
-        const hasDuplicate = sorted.some((slip) => slip.status === "duplicate_slip");
-        const hasHistory =
-          sorted.length > 1 || sorted.some((slip) => Boolean(slip.replaced_by_slip_id));
+  const slipGroups = useMemo(() => {
+    return allSlipGroups.filter((group) => {
+      if (slipFilter === "review") return group.primary.status === "manual_review";
+      if (slipFilter === "paid") return group.primary.status === "verified";
+      if (slipFilter === "duplicate") return group.hasDuplicate;
+      if (slipFilter === "history") return group.hasHistory;
+      if (slipFilter === "problem") return group.hasProblem;
+      return true;
+    });
+  }, [allSlipGroups, slipFilter]);
 
-        return {
-          key,
-          primary,
-          history,
-          count: sorted.length,
-          hasProblem,
-          hasDuplicate,
-          hasHistory
-        };
-      })
-      .filter((group) => {
-        if (slipFilter === "review") return group.primary.status === "manual_review";
-        if (slipFilter === "paid") return group.primary.status === "verified";
-        if (slipFilter === "duplicate") return group.hasDuplicate;
-        if (slipFilter === "history") return group.hasHistory;
-        if (slipFilter === "problem") return group.hasProblem;
-        return true;
-      });
-  }, [detail?.slips, slipFilter]);
+  const slipGroupCounts = useMemo(
+    () => ({
+      review: allSlipGroups.filter((g) => g.primary.status === "manual_review").length,
+      all: allSlipGroups.length,
+      paid: allSlipGroups.filter((g) => g.primary.status === "verified").length,
+      duplicate: allSlipGroups.filter((g) => g.hasDuplicate).length,
+      history: allSlipGroups.filter((g) => g.hasHistory).length,
+      problem: allSlipGroups.filter((g) => g.hasProblem).length
+    }),
+    [allSlipGroups]
+  );
+
+  const targetCounts = useMemo(() => {
+    const allT = detail?.targets ?? [];
+    return {
+      review: allT.filter((t) => t.status === "manual_review").length,
+      unpaid: allT.filter((t) => t.status !== "verified").length,
+      paid: allT.filter((t) => t.status === "verified").length,
+      all: allT.length
+    };
+  }, [detail?.targets]);
 
   return (
     <div className={adminUser ? "page adminAppPage" : "page"}>
@@ -1195,18 +1209,23 @@ export default function Home() {
                 </span>
               </div>
               <div className="segmented">
-                {[
-                  ["review", "รอตรวจ"],
-                  ["unpaid", "ยังไม่จ่าย"],
-                  ["paid", "จ่ายแล้ว"],
-                  ["all", "ทั้งหมด"]
-                ].map(([value, label]) => (
+                {(
+                  [
+                    ["review", "รอตรวจ"],
+                    ["unpaid", "ยังไม่จ่าย"],
+                    ["paid", "จ่ายแล้ว"],
+                    ["all", "ทั้งหมด"]
+                  ] as [keyof typeof targetCounts, string][]
+                ).map(([value, label]) => (
                   <button
                     key={value}
                     className={targetFilter === value ? "active" : ""}
                     onClick={() => setTargetFilter(value)}
                   >
                     {label}
+                    {targetCounts[value] > 0 && (
+                      <span className="filterCount">{targetCounts[value]}</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -1320,20 +1339,25 @@ export default function Home() {
                 </div>
               </details>
               <div className="segmented">
-                {[
-                  ["review", "รอตรวจ"],
-                  ["all", "ทั้งหมด"],
-                  ["paid", "จ่ายแล้ว"],
-                  ["duplicate", "สลิปซ้ำ"],
-                  ["history", "ประวัติ"],
-                  ["problem", "มีปัญหา"]
-                ].map(([value, label]) => (
+                {(
+                  [
+                    ["review", "รอตรวจ"],
+                    ["all", "ทั้งหมด"],
+                    ["paid", "จ่ายแล้ว"],
+                    ["duplicate", "สลิปซ้ำ"],
+                    ["history", "ประวัติ"],
+                    ["problem", "มีปัญหา"]
+                  ] as [keyof typeof slipGroupCounts, string][]
+                ).map(([value, label]) => (
                   <button
                     key={value}
                     className={slipFilter === value ? "active" : ""}
                     onClick={() => setSlipFilter(value)}
                   >
                     {label}
+                    {slipGroupCounts[value] > 0 && (
+                      <span className="filterCount">{slipGroupCounts[value]}</span>
+                    )}
                   </button>
                 ))}
               </div>
