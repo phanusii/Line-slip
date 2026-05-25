@@ -596,7 +596,7 @@ export function buildApprovalVerifiedFlex(opts: {
           },
           {
             type: "text",
-            text: "ผู้ดูแลได้ยืนยันการชำระเงินของคุณเรียบร้อยแล้ว",
+            text: "ครูสีสวยได้ยืนยันการชำระเงินของคุณเรียบร้อยแล้วค่ะ",
             color: "#64748b",
             size: "xs",
             wrap: true
