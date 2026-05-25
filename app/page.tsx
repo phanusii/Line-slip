@@ -1594,7 +1594,9 @@ export default function Home() {
                 <span>LINE push policy</span>
                 <select value={linePushPolicy} onChange={(e) => setLinePushPolicy(e.target.value)}>
                   <option value="disabled">ปิดทั้งหมด ไม่ส่ง LINE push</option>
+                  <option value="quota_aware">ส่งการ์ดเฉพาะตอนอนุมัติสลิป และเช็กโควตาก่อนส่ง</option>
                 </select>
+                <small className="hint">โหมดนี้ไม่เปิด reply อื่นใน LINE ใช้เฉพาะการ์ดแจ้ง “ชำระเงินสำเร็จ” หลังแอดมินอนุมัติ</small>
               </label>
               <label className="field">
                 <span>ช่องทางตรวจสลิปแอดมิน</span>

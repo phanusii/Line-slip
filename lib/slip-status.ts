@@ -1,6 +1,8 @@
 import { actorFromRequest } from "@/lib/auth";
-import { buildApprovalRejectedFlex, buildApprovalVerifiedFlex, liffUri, pushLine } from "@/lib/line";
+import { buildApprovalVerifiedFlex, liffUri, pushLineQuotaAware, type LineQuotaAwarePushResult } from "@/lib/line";
+import { getLinePushPolicy, getSettings } from "@/lib/settings";
 import { createServiceClient } from "@/lib/supabase/server";
+import { sendTelegramLineQuotaNotice } from "@/lib/telegram-line-quota";
 
 const finalStatuses = new Set(["verified", "rejected"]);
 
@@ -86,17 +88,19 @@ export async function applySlipStatus(input: {
 
   if (audit.error) throw audit.error;
 
-  if (input.status === "verified" || input.status === "rejected") {
+  if (input.status === "verified") {
     await notifyLineUserAfterReview({
       slipId: input.slipId,
       status: input.status,
+      eventId: slip.event_id,
       slipLineUserId: slip.line_user_id,
       target,
-      reason: input.reason
+      reason: input.reason,
+      actor: input.actor
     }).catch(async (notifyError) => {
       await supabase.from("audit_logs").insert({
         ...input.actor,
-        action: "line_push_failed",
+        action: "line_approval_card_failed",
         entity_type: "slip_submission",
         entity_id: input.slipId,
         event_id: slip.event_id,
@@ -112,86 +116,108 @@ export async function applySlipStatus(input: {
 async function notifyLineUserAfterReview(input: {
   slipId: string;
   status: string;
+  eventId: string | null;
   slipLineUserId?: string | null;
   target: {
     display_name: string;
     amount_due: number;
     selected_line_user_id: string | null;
-    events?: { name: string } | Array<{ name: string }> | null;
+    events?: { id?: string; name: string } | Array<{ id?: string; name: string }> | null;
   } | null;
   reason?: string | null;
+  actor: Actor;
 }) {
   const supabase = createServiceClient();
+  if (input.status !== "verified" || !input.target) return;
 
-  // หา line_users DB id: ให้ความสำคัญ selected_line_user_id ก่อน (ผู้เลือก QR)
-  // ตามด้วย slipLineUserId (ผู้อัปสลิป) — ปกติจะเป็นคนเดียวกัน
-  const lineUserDbId = input.target?.selected_line_user_id ?? input.slipLineUserId ?? null;
+  const settings = await getSettings(["line_push_policy", "telegram_bot_token", "telegram_chat_id"]);
+  const eventRow = Array.isArray(input.target.events) ? input.target.events[0] : input.target.events;
+  const eventName = eventRow?.name ?? "รายการชำระเงิน";
+  const displayName = input.target.display_name;
+  const amountDue = Number(input.target.amount_due ?? 0);
+  const lineUserDbId = input.target.selected_line_user_id ?? input.slipLineUserId ?? null;
 
-  if (!lineUserDbId) {
-    console.log(`[slip-status] notifyLineUserAfterReview: ไม่พบ line_user_id — ข้ามการแจ้งเตือน slipId=${input.slipId}`);
-    return;
+  let result: LineQuotaAwarePushResult = {
+    ok: false,
+    skipped: true,
+    reason: "missing_line_user",
+    quotaBefore: null,
+    quotaAfter: null,
+    error: "ไม่พบ LINE user ของผู้รับ"
+  };
+  let lineUserId: string | null = null;
+
+  if (lineUserDbId) {
+    const { data: lineUser, error: lineUserError } = await supabase
+      .from("line_users")
+      .select("line_user_id")
+      .eq("id", lineUserDbId)
+      .maybeSingle();
+
+    if (lineUserError) throw lineUserError;
+    lineUserId = lineUser?.line_user_id ?? null;
   }
 
-  // แปลง DB uuid → LINE user ID string (Uxxxxxxxx)
-  const { data: lineUser } = await supabase
-    .from("line_users")
-    .select("line_user_id")
-    .eq("id", lineUserDbId)
-    .maybeSingle();
-
-  if (!lineUser?.line_user_id) {
-    console.log(`[slip-status] notifyLineUserAfterReview: ไม่พบ line_user_id ใน DB — ข้ามการแจ้งเตือน slipId=${input.slipId}`);
-    return;
-  }
-
-  const lineUserId = lineUser.line_user_id;
-  const eventRow = Array.isArray(input.target?.events) ? input.target?.events[0] : input.target?.events;
-  const eventName = eventRow?.name ?? "ไม่พบชื่องาน";
-  const displayName = input.target?.display_name ?? "ไม่พบชื่อ";
-  const amountDue = Number(input.target?.amount_due ?? 0);
-
-  let message: unknown;
-  if (input.status === "verified") {
-    message = buildApprovalVerifiedFlex({
+  if (lineUserId) {
+    const message = buildApprovalVerifiedFlex({
       displayName,
       eventName,
       amountDue,
       paidAt: new Date().toISOString(),
       liffMeUrl: liffUri("me")
     });
-  } else {
-    message = buildApprovalRejectedFlex({
-      displayName,
-      eventName,
-      amountDue,
-      reason: input.reason ?? null,
-      liffSlipUrl: liffUri("slip")
+    result = await pushLineQuotaAware({
+      lineUserId,
+      messages: [message],
+      policy: getLinePushPolicy(settings)
     });
   }
 
-  const result = await pushLine(lineUserId, [message]);
+  const action = result.ok
+    ? "line_approval_card_sent"
+    : result.skipped
+      ? "line_approval_card_skipped"
+      : "line_approval_card_failed";
 
-  if (!result.ok) {
-    throw new Error(`LINE push ไม่สำเร็จ: ${result.error ?? "unknown error"}`);
-  }
-
-  console.log(`[slip-status] ส่งแจ้งเตือน LINE push สำเร็จ → ${lineUserId} status=${input.status} slipId=${input.slipId}`);
-
-  await supabase.from("audit_logs").insert({
-    actor_email: "system",
-    actor_role: "viewer",
-    action: "line_push_sent",
+  const { error: auditError } = await supabase.from("audit_logs").insert({
+    ...input.actor,
+    action,
     entity_type: "slip_submission",
     entity_id: input.slipId,
+    event_id: input.eventId,
     after_data: {
       status: input.status,
+      line_push_result: result,
+      slip_line_user_id: input.slipLineUserId ?? null,
+      target_line_user_id: input.target.selected_line_user_id ?? null,
       line_user_id: lineUserId,
       event_name: eventName,
       display_name: displayName,
       amount_due: amountDue
     },
-    reason: input.status === "verified"
-      ? "แจ้งผู้ใช้ทาง LINE ว่าสลิปผ่านการอนุมัติแล้ว"
-      : "แจ้งผู้ใช้ทาง LINE ว่าสลิปไม่ผ่านการตรวจ"
+    reason: result.reason ?? input.reason ?? null
   });
+  if (auditError) throw auditError;
+
+  const telegramNotice = await sendTelegramLineQuotaNotice(settings, {
+    result,
+    displayName,
+    eventName,
+    amountDue
+  }).catch((error) => ({
+    ok: false,
+    error: error instanceof Error ? error.message : String(error)
+  }));
+
+  if (!telegramNotice.ok) {
+    await supabase.from("audit_logs").insert({
+      ...input.actor,
+      action: "telegram_line_quota_notice_failed",
+      entity_type: "slip_submission",
+      entity_id: input.slipId,
+      event_id: input.eventId,
+      after_data: telegramNotice,
+      reason: "ส่งสรุปโควตา LINE เข้า Telegram ไม่สำเร็จ"
+    });
+  }
 }

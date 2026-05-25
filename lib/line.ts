@@ -126,6 +126,9 @@ export async function pushLine(lineUserId: string, messages: unknown[]) {
   return { ok: true };
 }
 
+export type LineMessageQuota = Awaited<ReturnType<typeof getLineMessageQuota>>;
+export type LinePushPolicy = "disabled" | "quota_aware";
+
 export async function getLineMessageQuota() {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
   if (!token) throw new Error("ยังไม่ได้ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN");
@@ -154,7 +157,106 @@ export async function getLineMessageQuota() {
   };
 }
 
-export function buildVerifiedStatusFlex(opts: {
+async function pushLineDirect(lineUserId: string, messages: unknown[]) {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) {
+    return { ok: false, error: "LINE_CHANNEL_ACCESS_TOKEN is not configured" };
+  }
+
+  const response = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ to: lineUserId, messages })
+  });
+
+  if (!response.ok) {
+    return { ok: false, error: await response.text() };
+  }
+
+  return { ok: true };
+}
+
+export async function pushLineQuotaAware(input: {
+  lineUserId: string;
+  messages: unknown[];
+  policy: LinePushPolicy;
+}) {
+  if (input.policy !== "quota_aware") {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "policy_disabled",
+      quotaBefore: null,
+      quotaAfter: null,
+      error: "LINE push policy is disabled"
+    };
+  }
+
+  if (!process.env.LINE_CHANNEL_ACCESS_TOKEN) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "missing_token",
+      quotaBefore: null,
+      quotaAfter: null,
+      error: "LINE_CHANNEL_ACCESS_TOKEN is not configured"
+    };
+  }
+
+  let quotaBefore: LineMessageQuota;
+  try {
+    quotaBefore = await getLineMessageQuota();
+  } catch (error) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "quota_check_failed",
+      quotaBefore: null,
+      quotaAfter: null,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+
+  if (!quotaBefore.canPush) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "quota_exhausted",
+      quotaBefore,
+      quotaAfter: quotaBefore,
+      error: "LINE message quota is exhausted"
+    };
+  }
+
+  const pushed = await pushLineDirect(input.lineUserId, input.messages);
+  if (!pushed.ok) {
+    return {
+      ok: false,
+      skipped: false,
+      reason: "line_push_failed",
+      quotaBefore,
+      quotaAfter: quotaBefore,
+      error: pushed.error ?? "LINE push failed"
+    };
+  }
+
+  const quotaAfter = await getLineMessageQuota().catch(() => null);
+  return {
+    ok: true,
+    skipped: false,
+    reason: "sent",
+    quotaBefore,
+    quotaAfter,
+    error: null
+  };
+}
+
+export type LineQuotaAwarePushResult = Awaited<ReturnType<typeof pushLineQuotaAware>>;
+
+export function buildApprovalFlexMessage(opts: {
   displayName: string;
   eventName: string;
   amountDue: number;
@@ -166,16 +268,17 @@ export function buildVerifiedStatusFlex(opts: {
 
   return {
     type: "flex",
-    altText: `✅ ชำระเงินแล้ว — ${opts.displayName}`,
+    altText: `✅ ชำระเงินสำเร็จ — ${opts.displayName}`,
     contents: {
       type: "bubble",
       header: {
         type: "box",
         layout: "vertical",
-        backgroundColor: "#16a34a",
-        paddingAll: "20px",
+        backgroundColor: "#10b981",
+        paddingAll: "18px",
         contents: [
-          { type: "text", text: "✅ ชำระเงินแล้ว", color: "#ffffff", weight: "bold", size: "xl" }
+          { type: "text", text: "ชำระเงินสำเร็จ", color: "#ffffff", weight: "bold", size: "xl" },
+          { type: "text", text: "ขอบคุณสำหรับการชำระเงิน", color: "#ecfdf5", size: "sm", margin: "sm" }
         ]
       },
       body: {
@@ -183,28 +286,57 @@ export function buildVerifiedStatusFlex(opts: {
         layout: "vertical",
         spacing: "sm",
         contents: [
-          { type: "text", text: opts.displayName, weight: "bold", size: "lg" },
-          { type: "text", text: opts.eventName, color: "#888888", size: "sm" },
+          { type: "text", text: opts.eventName, weight: "bold", size: "lg", wrap: true },
+          { type: "text", text: opts.displayName, color: "#64748b", size: "sm", wrap: true },
           { type: "separator", margin: "md" },
           {
             type: "box", layout: "horizontal", margin: "md",
             contents: [
-              { type: "text", text: "ยอดเงิน", flex: 1, color: "#555555", size: "sm" },
-              { type: "text", text: `${Number(opts.amountDue).toLocaleString("th-TH")} บาท`, flex: 1, align: "end", weight: "bold", size: "sm" }
+              { type: "text", text: "ยอดเงิน", flex: 1, color: "#64748b", size: "sm" },
+              {
+                type: "text",
+                text: `${Number(opts.amountDue).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท`,
+                flex: 1,
+                align: "end",
+                weight: "bold",
+                size: "sm"
+              }
             ]
           },
           ...(dateStr ? [{
             type: "box", layout: "horizontal",
             contents: [
-              { type: "text", text: "วันที่", flex: 1, color: "#555555", size: "sm" },
-              { type: "text", text: dateStr, flex: 1, align: "end", size: "sm" }
+              { type: "text", text: "อนุมัติเมื่อ", flex: 1, color: "#64748b", size: "sm" },
+              { type: "text", text: dateStr, flex: 1, align: "end", size: "sm", wrap: true }
             ]
-          }] : [])
+          }] : []),
+          {
+            type: "text",
+            text: "ระบบบันทึกสถานะเรียบร้อยแล้ว ขอขอบคุณค่ะ",
+            color: "#64748b",
+            size: "xs",
+            margin: "md",
+            wrap: true
+          }
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#2563eb",
+            action: { type: "uri", label: "ดูสถานะ", uri: liffStatusCardUri() }
+          }
         ]
       }
     }
   };
 }
+
+export const buildVerifiedStatusFlex = buildApprovalFlexMessage;
 
 const lineStatusText: Record<string, string> = {
   unpaid: "ยังไม่จ่าย",
