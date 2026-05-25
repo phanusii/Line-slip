@@ -250,7 +250,23 @@ export async function generateFourButtonMenuImage(): Promise<Buffer> {
     import("node:fs/promises"),
     import("node:path")
   ]);
-  return readFile(path.join(process.cwd(), "public", "rich-menu-4btn.jpg"));
+  try {
+    return await readFile(path.join(process.cwd(), "public", "rich-menu-4btn.jpg"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL
+    || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+  if (!baseUrl) {
+    throw new Error("ไม่พบไฟล์ Rich Menu และยังไม่ได้ตั้งค่า NEXT_PUBLIC_APP_URL");
+  }
+
+  const response = await fetch(`${baseUrl}/rich-menu-4btn.jpg`);
+  if (!response.ok) {
+    throw new Error(`โหลดรูป Rich Menu ไม่สำเร็จ: ${response.status}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
 }
 
 /**
