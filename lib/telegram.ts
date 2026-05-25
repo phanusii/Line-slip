@@ -14,7 +14,7 @@ const telegramButtons = {
   latest: "🧾 สลิปล่าสุด",
   unpaid: "⏳ ค้างจ่าย",
   paid: "✅ จ่ายแล้ว",
-  help: "❓ ช่วยเหลือ"
+  web: "🌐 เว็บ"
 } as const;
 
 const targetPageSize = 12;
@@ -79,7 +79,7 @@ function mainKeyboard() {
     keyboard: [
       [telegramButtons.events, telegramButtons.pending],
       [telegramButtons.latest, telegramButtons.unpaid],
-      [telegramButtons.paid, telegramButtons.help]
+      [telegramButtons.paid, telegramButtons.web]
     ],
     resize_keyboard: true,
     is_persistent: true,
@@ -606,7 +606,18 @@ async function handleTelegramCommand(message: TelegramMessage) {
   }
 
   if (command === "/start" || command === "/help") {
-    await sendTelegramHelp(chatId, settings);
+    await callTelegram(settings, "sendMessage", messageWithMainKeyboard({
+      chat_id: chatId,
+      text: [
+        "ยินดีต้อนรับ! เลือกเมนูจากปุ่มด้านล่างได้เลย 👇",
+        `${telegramButtons.events} ดูงานทั้งหมด`,
+        `${telegramButtons.pending} สลิปรอตรวจ`,
+        `${telegramButtons.latest} สลิปล่าสุด`,
+        `${telegramButtons.unpaid} รายการค้างจ่าย`,
+        `${telegramButtons.paid} รายการจ่ายแล้ว`,
+        `${telegramButtons.web} เปิดหน้าเว็บหลังบ้าน`
+      ].join("\n")
+    }));
     return;
   }
 
@@ -634,8 +645,15 @@ async function handleTelegramCommand(message: TelegramMessage) {
     await sendCrossEventTargetSummary(chatId, settings, "paid");
     return;
   }
-  if (text === telegramButtons.help) {
-    await sendTelegramHelp(chatId, settings);
+  if (text === telegramButtons.web) {
+    await callTelegram(settings, "sendMessage", {
+      chat_id: chatId,
+      text: "เปิดหน้าเว็บหลังบ้านได้เลย 👇",
+      reply_markup: {
+        inline_keyboard: [[{ text: "🌐 เปิดเว็บ", url: appBaseUrl() }]]
+      }
+    });
+    return;
   }
 }
 
@@ -643,19 +661,7 @@ async function isTrustedChat(chatId: string, settings: SettingsMap) {
   return settings.telegram_chat_id === chatId;
 }
 
-async function sendTelegramHelp(chatId: string, settings: SettingsMap) {
-  await callTelegram(settings, "sendMessage", messageWithMainKeyboard({
-    chat_id: chatId,
-    text: [
-      "เลือกเมนูจากปุ่มด้านล่างได้เลย",
-      `${telegramButtons.events} ดูงานทั้งหมดและเลือกดูรายชื่อ`,
-      `${telegramButtons.pending} เปิดคิวสลิปรอตรวจ`,
-      `${telegramButtons.latest} ดูสลิปล่าสุด`,
-      `${telegramButtons.unpaid} ดูรายการค้างจ่าย`,
-      `${telegramButtons.paid} ดูรายการจ่ายแล้ว`
-    ].join("\n")
-  }));
-}
+
 
 function targetFilterLabel(filter: TargetFilter) {
   if (filter === "paid") return "จ่ายแล้ว";
