@@ -208,13 +208,16 @@ type AuthUser = {
 };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  const isFormData = init?.body instanceof FormData;
+  if (!isFormData && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+
   const response = await fetch(path, {
     ...init,
     credentials: "include",
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers ?? {})
-    }
+    headers
   });
 
   if (!response.ok) {

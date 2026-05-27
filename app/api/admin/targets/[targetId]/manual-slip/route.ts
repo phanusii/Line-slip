@@ -29,9 +29,18 @@ export async function POST(
       );
     }
 
-    const form = await request.formData();
-    const file = form.get("file");
-    const note = String(form.get("note") ?? "").trim();
+    const contentType = request.headers.get("content-type") ?? "";
+    let file: FormDataEntryValue | null = null;
+    let note = "";
+
+    if (contentType.includes("multipart/form-data") || contentType.includes("application/x-www-form-urlencoded")) {
+      const form = await request.formData();
+      file = form.get("file");
+      note = String(form.get("note") ?? "").trim();
+    } else if (contentType.includes("application/json")) {
+      const body = await request.json().catch(() => ({})) as { note?: string };
+      note = String(body.note ?? "").trim();
+    }
 
     let storagePath: string | null = null;
     let fileSize: number | null = null;
