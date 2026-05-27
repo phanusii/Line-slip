@@ -64,6 +64,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "รายชื่อนี้ชำระเงินแล้วหรือไม่พร้อมใช้งาน" }, { status: 400 });
     }
 
+    if (target.status === "manual_review" && target.selected_line_user_id !== lineUser.id) {
+      return NextResponse.json(
+        { error: "รายชื่อนี้ส่งสลิปแล้วและกำลังรอตรวจ กรุณาเลือกรายชื่ออื่น" },
+        { status: 409 }
+      );
+    }
+
     const selectedAt = new Date().toISOString();
     const updated = await supabase
       .from("payment_targets")
@@ -76,7 +83,6 @@ export async function POST(request: NextRequest) {
       .eq("event_id", target.event_id)
       .neq("status", "verified")
       .neq("status", "deleted")
-      .or(`selected_line_user_id.is.null,selected_line_user_id.eq.${lineUser.id}`)
       .select("id")
       .maybeSingle();
 
@@ -84,7 +90,7 @@ export async function POST(request: NextRequest) {
 
     if (!updated.data) {
       return NextResponse.json(
-        { error: "รายชื่อนี้ถูกเลือกไว้แล้ว หากเลือกผิดให้ติดต่อผู้ดูแล" },
+        { error: "รายชื่อนี้ไม่พร้อมให้เลือก กรุณาเลือกรายชื่ออื่น" },
         { status: 409 }
       );
     }
@@ -95,7 +101,7 @@ export async function POST(request: NextRequest) {
       .eq("event_id", target.event_id)
       .eq("selected_line_user_id", lineUser.id)
       .neq("id", target.id)
-      .neq("status", "verified");
+      .in("status", ["pending_slip", "rejected", "amount_mismatch"]);
 
     if (cleared.error) throw cleared.error;
 
