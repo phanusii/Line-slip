@@ -69,8 +69,8 @@ export async function POST(
         status: "manual_review",
         amount_expected: target.amount_due,
         storage_path: storagePath,
-        storage_bucket: storagePath ? STORAGE_BUCKET : null,
-        file_size: fileSize,
+        storage_bucket: STORAGE_BUCKET,
+        file_size: fileSize ?? 0,
         auto_check_status: "admin_manual",
         auto_check_reasons: ["admin_manual_entry"]
       })
