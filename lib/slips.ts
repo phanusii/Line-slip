@@ -26,6 +26,7 @@ type UploadSlipInput = {
   lineMessageId?: string | null;
   lineUserDbId?: string | null;
   notifyAdmin?: boolean;
+  deferProviderCheck?: boolean;
 };
 
 export type UploadSlipResult = {
@@ -218,11 +219,13 @@ export async function uploadSlipImage(input: UploadSlipInput) {
     } satisfies UploadSlipResult;
   }
 
-  const providerCheck = await runProviderCheck({
-    imageBuffer: normalized,
-    amountExpected: input.amountExpected,
-    fallbackReference: slipRef
-  });
+  const providerCheck = input.deferProviderCheck
+    ? await queuedOrManualProviderCheck(slipRef)
+    : await runProviderCheck({
+        imageBuffer: normalized,
+        amountExpected: input.amountExpected,
+        fallbackReference: slipRef
+      });
 
   // Use payment_target_id (UUID) instead of person name — avoids Thai-character URL encoding issues
   const path = `events/${input.eventId}/manual_review/${targetSegment}_${amount}_${datePart}_${imageHash.slice(0, 12)}.jpg`;
@@ -482,6 +485,122 @@ async function runProviderCheck(input: {
       ? "SlipOK quota หมดหรือเกินโควต้าหลังตรวจสลิป ระบบจึงปิดกลับเป็น Manual"
       : null
   };
+}
+
+async function queuedOrManualProviderCheck(fallbackReference: string | null): Promise<ProviderCheck> {
+  const settings = await getSettings(["slip_verification_provider"]);
+  if (getSlipVerificationProvider(settings) !== "slipok") {
+    return {
+      verificationProvider: "manual",
+      checkStatus: "disabled",
+      reasons: ["manual_review_only"],
+      amountDetected: null,
+      response: null,
+      reference: fallbackReference,
+      checkedAt: new Date().toISOString(),
+      shouldAutoApprove: false
+    };
+  }
+
+  return {
+    verificationProvider: "slipok",
+    checkStatus: "slipok_queued",
+    reasons: ["slipok_queued"],
+    amountDetected: null,
+    response: null,
+    reference: fallbackReference,
+    checkedAt: new Date().toISOString(),
+    shouldAutoApprove: false
+  };
+}
+
+export async function processDeferredSlipVerification(input: {
+  slipId: string;
+  notifyAdminOnManual?: boolean;
+}) {
+  const supabase = createServiceClient();
+  const { data: slip, error } = await supabase
+    .from("slip_submissions")
+    .select("*")
+    .eq("id", input.slipId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!slip || slip.status !== "manual_review") return { ok: true, skipped: "not_manual_review" };
+  if (slip.verification_provider !== "slipok" || slip.provider_check_status !== "slipok_queued") {
+    if (input.notifyAdminOnManual !== false) await notifyAdminSlipReview(input.slipId);
+    return { ok: true, skipped: "not_slipok_queued" };
+  }
+  if (!slip.storage_bucket || !slip.storage_path) {
+    if (input.notifyAdminOnManual !== false) await notifyAdminSlipReview(input.slipId);
+    return { ok: true, skipped: "missing_storage" };
+  }
+
+  const downloaded = await supabase.storage.from(slip.storage_bucket).download(slip.storage_path);
+  if (downloaded.error) throw downloaded.error;
+  const imageBuffer = Buffer.from(await downloaded.data.arrayBuffer());
+
+  const providerCheck = await runProviderCheck({
+    imageBuffer,
+    amountExpected: slip.amount_expected === null ? null : Number(slip.amount_expected),
+    fallbackReference: slip.slip_ref ?? null
+  });
+
+  const updated = await supabase
+    .from("slip_submissions")
+    .update({
+      amount_detected: providerCheck.amountDetected,
+      auto_check_status: providerCheck.checkStatus,
+      auto_check_reasons: providerCheck.reasons,
+      auto_checked_at: providerCheck.checkedAt,
+      verification_provider: providerCheck.verificationProvider,
+      provider_check_status: providerCheck.checkStatus,
+      provider_response: providerCheck.response,
+      provider_checked_at: providerCheck.checkedAt,
+      provider_reference: providerCheck.reference
+    })
+    .eq("id", input.slipId)
+    .eq("status", "manual_review")
+    .select("id,status")
+    .maybeSingle();
+
+  if (updated.error) throw updated.error;
+  if (!updated.data) return { ok: true, skipped: "status_changed" };
+
+  if (providerCheck.verificationProvider === "slipok" && providerCheck.usageStatus) {
+    await recordSlipOkUsage({
+      slipId: input.slipId,
+      quotaBefore: providerCheck.quotaBefore,
+      quotaAfter: providerCheck.quotaAfter,
+      providerStatus: providerCheck.usageStatus
+    }).catch((usageError) => {
+      console.error("slipok usage log failed", usageError);
+    });
+  }
+
+  if (providerCheck.disableReason) {
+    await disableSlipOkToManual(providerCheck.disableReason).catch((disableError) => {
+      console.error("slipok auto disable failed", disableError);
+    });
+  }
+
+  if (providerCheck.shouldAutoApprove) {
+    await applySlipStatus({
+      slipId: input.slipId,
+      status: "verified",
+      reason: "SlipOK ตรวจสลิปผ่านและยอดตรง",
+      actor: { actor_email: "system-slipok", actor_role: "viewer" },
+      auditAction: "slipok_auto_verified",
+      source: "slipok"
+    });
+    return { ok: true, status: "verified" };
+  }
+
+  if (input.notifyAdminOnManual !== false) {
+    await notifyAdminSlipReview(input.slipId);
+  }
+
+  return { ok: true, status: "manual_review", autoCheckStatus: providerCheck.checkStatus };
 }
 
 export async function downloadLineContent(messageId: string) {

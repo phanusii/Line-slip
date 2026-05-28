@@ -1,5 +1,6 @@
 import type { LineMessageQuota } from "@/lib/line";
 import type { SettingsMap } from "@/lib/settings";
+import { getSlipOkQuota, getSlipOkUsedThisMonth } from "@/lib/slipok";
 
 type ApprovalNoticeResult = {
   ok: boolean;
@@ -30,13 +31,30 @@ function formatQuota(quota?: LineMessageQuota | null) {
   return `เหลือ ${Number(quota.remaining ?? 0).toLocaleString("th-TH")}/${Number(quota.limit ?? 0).toLocaleString("th-TH")} ข้อความ (ใช้แล้ว ${quota.used.toLocaleString("th-TH")})`;
 }
 
-function buildNoticeText(input: {
+async function formatSlipOkQuota(settings: SettingsMap) {
+  const [quota, usedThisMonth] = await Promise.all([
+    getSlipOkQuota(settings).catch(() => null),
+    getSlipOkUsedThisMonth().catch(() => 0)
+  ]);
+  if (!quota) return "ไม่ทราบ";
+  if (!quota.ok) return `เช็กไม่ได้ (${quota.error ?? "ไม่ทราบสาเหตุ"})`;
+  const remaining = quota.remaining ?? quota.quota ?? null;
+  const overQuota = Number(quota.overQuota ?? 0);
+  return [
+    `เหลือ ${remaining === null ? "ไม่ทราบ" : remaining.toLocaleString("th-TH")} สลิป`,
+    `ใช้ในระบบเดือนนี้ ${usedThisMonth.toLocaleString("th-TH")} สลิป`,
+    overQuota > 0 ? `overQuota ${overQuota.toLocaleString("th-TH")}` : null
+  ].filter(Boolean).join(" · ");
+}
+
+async function buildNoticeText(settings: SettingsMap, input: {
   result: ApprovalNoticeResult;
   displayName: string;
   eventName: string;
   amountDue: number;
 }) {
   const reason = input.result.reason ? reasonLabels[input.result.reason] ?? input.result.reason : "-";
+  const slipOkQuota = await formatSlipOkQuota(settings);
   const statusLine = input.result.ok
     ? "ส่งการ์ด LINE ให้ผู้ใช้แล้ว"
     : input.result.skipped
@@ -51,6 +69,7 @@ function buildNoticeText(input: {
     `ยอด: ${formatAmount(input.amountDue)} บาท`,
     `โควตาก่อนส่ง: ${formatQuota(input.result.quotaBefore)}`,
     `โควตาหลังส่ง: ${formatQuota(input.result.quotaAfter ?? input.result.quotaBefore)}`,
+    `โควตา SlipOK: ${slipOkQuota}`,
     input.result.error ? `หมายเหตุ: ${input.result.error}` : null
   ].filter(Boolean).join("\n");
 }
@@ -75,7 +94,7 @@ export async function sendTelegramLineQuotaNotice(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId,
-      text: buildNoticeText(input)
+      text: await buildNoticeText(settings, input)
     })
   });
   const data = (await response.json().catch(() => null)) as { ok?: boolean; description?: string } | null;

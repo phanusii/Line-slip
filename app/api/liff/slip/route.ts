@@ -3,7 +3,7 @@ import { after } from "next/server";
 import { formatApiError } from "@/lib/api-error";
 import { notifyAdminSlipReview } from "@/lib/admin-review";
 import { verifyAndGetProfile } from "@/lib/liff";
-import { uploadSlipImage } from "@/lib/slips";
+import { processDeferredSlipVerification, uploadSlipImage } from "@/lib/slips";
 import { createServiceClient } from "@/lib/supabase/server";
 
 export async function POST(request: NextRequest) {
@@ -95,11 +95,22 @@ export async function POST(request: NextRequest) {
       sourceBuffer: buffer,
       mimeType: file.type,
       lineUserDbId: lineUser.id,
-      notifyAdmin: false
+      notifyAdmin: false,
+      deferProviderCheck: true
     });
 
     if (slip.id && slip.status === "manual_review") {
       after(async () => {
+        if (slip.autoCheckStatus === "slipok_queued") {
+          await processDeferredSlipVerification({
+            slipId: slip.id as string,
+            notifyAdminOnManual: true
+          }).catch((notifyError) => {
+            console.error("deferred slip verification failed", notifyError);
+          });
+          return;
+        }
+
         await notifyAdminSlipReview(slip.id as string).catch((notifyError) => {
           console.error("slip review notification failed", notifyError);
         });

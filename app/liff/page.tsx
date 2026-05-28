@@ -27,6 +27,11 @@ type UploadState = {
   progress?: number;
 };
 
+type UploadDialogState = {
+  message: string;
+  previewUrl: string | null;
+};
+
 type EventRow = {
   id: string;
   name: string;
@@ -250,7 +255,7 @@ async function compressSlipFile(file: File) {
   const objectUrl = URL.createObjectURL(file);
   try {
     const image = await loadImageFromObjectUrl(objectUrl);
-    const maxEdge = 1280;
+    const maxEdge = 960;
     const scale = Math.min(1, maxEdge / Math.max(image.naturalWidth, image.naturalHeight));
     const width = Math.max(1, Math.round(image.naturalWidth * scale));
     const height = Math.max(1, Math.round(image.naturalHeight * scale));
@@ -263,7 +268,7 @@ async function compressSlipFile(file: File) {
     context.drawImage(image, 0, 0, width, height);
 
     const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/jpeg", 0.72)
+      canvas.toBlob(resolve, "image/jpeg", 0.62)
     );
     if (!blob) return file;
     if (blob.size >= file.size && scale === 1) return file;
@@ -329,6 +334,7 @@ export default function LiffPaymentPage() {
   const [slipFile, setSlipFile] = useState<File | null>(null);
   const [slipPreviewUrl, setSlipPreviewUrl] = useState<string | null>(null);
   const [uploadState, setUploadState] = useState<UploadState>({ phase: "idle" });
+  const [uploadDialog, setUploadDialog] = useState<UploadDialogState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [booting, setBooting] = useState(true);
@@ -336,6 +342,13 @@ export default function LiffPaymentPage() {
   const [error, setError] = useState<string | null>(null);
   const modeRequestRef = useRef(0);
   const targetRequestRef = useRef(0);
+  const uploadDialogPreviewRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (uploadDialogPreviewRef.current) URL.revokeObjectURL(uploadDialogPreviewRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!slipFile) return;
@@ -551,6 +564,10 @@ export default function LiffPaymentPage() {
       const message = data.message ?? "อัปโหลดสลิปเสร็จแล้ว รอผู้ดูแลตรวจสอบ";
       setUploadState({ phase: "done", message, progress: 100 });
       setNotice(message);
+      if (uploadDialogPreviewRef.current) URL.revokeObjectURL(uploadDialogPreviewRef.current);
+      const previewUrl = URL.createObjectURL(file);
+      uploadDialogPreviewRef.current = previewUrl;
+      setUploadDialog({ message, previewUrl });
       const nextStatus = data.alreadyVerified
         ? "verified"
         : data.slip?.status === "verified"
@@ -580,6 +597,14 @@ export default function LiffPaymentPage() {
   async function uploadSlip() {
     if (!slipFile || !result?.target.id) return;
     await uploadSlipForTarget(result.target.id, slipFile);
+  }
+
+  function closeUploadDialog() {
+    if (uploadDialogPreviewRef.current) {
+      URL.revokeObjectURL(uploadDialogPreviewRef.current);
+      uploadDialogPreviewRef.current = null;
+    }
+    setUploadDialog(null);
   }
 
   if (!liffId) {
@@ -788,6 +813,34 @@ export default function LiffPaymentPage() {
           ติดต่อ
         </a>
       </nav>
+
+      {uploadDialog ? (
+        <div className="liffDialogBackdrop" role="dialog" aria-modal="true" aria-label="อัปโหลดสลิปสำเร็จ">
+          <section className="liffDialog">
+            <span className="badge ok">รับสลิปแล้ว</span>
+            <h2>อัปโหลดสลิปเสร็จแล้ว</h2>
+            <p>{uploadDialog.message}</p>
+            {uploadDialog.previewUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={uploadDialog.previewUrl} alt="รูปสลิปที่อัปโหลดแล้ว" />
+            ) : null}
+            <div className="dialogActions">
+              <button
+                className="btn primary liffPrimary"
+                onClick={() => {
+                  closeUploadDialog();
+                  switchMode("me");
+                }}
+              >
+                ดูสถานะ
+              </button>
+              <button className="btn subtle liffPrimary" onClick={closeUploadDialog}>
+                ปิด
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

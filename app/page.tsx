@@ -188,6 +188,7 @@ const autoReasonLabels: Record<string, string> = {
   free_auto_review_passed: "ผ่านทุกเงื่อนไข",
   duplicate_slip_qr: "QR สลิปซ้ำ",
   duplicate_image_hash: "รูปสลิปซ้ำ",
+  slipok_queued: "รอตรวจ SlipOK",
   slipok_verified: "SlipOK ตรวจผ่าน",
   slipok_manual_review: "เข้าแอดมินตรวจ",
   slipok_quota_check_failed: "เช็กโควต้า SlipOK ไม่สำเร็จ",

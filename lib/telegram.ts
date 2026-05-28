@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { appBaseUrl, formatThaiDateTime, getLineMessageQuota } from "@/lib/line";
 import { getSettings, SettingsMap } from "@/lib/settings";
 import { applySlipStatus } from "@/lib/slip-status";
+import { getSlipOkQuota, getSlipOkUsedThisMonth } from "@/lib/slipok";
 import { createServiceClient } from "@/lib/supabase/server";
 
 type TelegramAction = "verified" | "rejected";
@@ -102,6 +103,32 @@ function compactName(user?: TelegramMessage["from"]) {
 
 function chatTitle(chat: TelegramChat) {
   return chat.title ?? chat.username ?? ([chat.first_name, chat.last_name].filter(Boolean).join(" ") || String(chat.id));
+}
+
+function formatTelegramLineQuota(quota: Awaited<ReturnType<typeof getLineMessageQuota>> | null) {
+  if (!quota) return null;
+  if (quota.type === "none") {
+    return `📨 โควตา LINE: ไม่จำกัด (ใช้แล้ว ${quota.used.toLocaleString("th-TH")})`;
+  }
+  return `📨 โควตา LINE: เหลือ ${Number(quota.remaining ?? 0).toLocaleString("th-TH")}/${Number(quota.limit ?? 0).toLocaleString("th-TH")} ข้อความ (ใช้แล้ว ${quota.used.toLocaleString("th-TH")})`;
+}
+
+function formatTelegramSlipOkQuota(input: {
+  quota: Awaited<ReturnType<typeof getSlipOkQuota>> | null;
+  usedThisMonth: number | null;
+}) {
+  if (!input.quota) return null;
+  if (!input.quota.ok) {
+    return `🧾 โควตา SlipOK: เช็กไม่ได้ (${input.quota.error ?? "ไม่ทราบสาเหตุ"})`;
+  }
+  const remaining = input.quota.remaining ?? input.quota.quota ?? null;
+  const used = input.usedThisMonth ?? 0;
+  const overQuota = Number(input.quota.overQuota ?? 0);
+  return [
+    `🧾 โควตา SlipOK: เหลือ ${remaining === null ? "ไม่ทราบ" : remaining.toLocaleString("th-TH")} สลิป`,
+    `ใช้ในระบบเดือนนี้ ${used.toLocaleString("th-TH")} สลิป`,
+    overQuota > 0 ? `overQuota ${overQuota.toLocaleString("th-TH")}` : null
+  ].filter(Boolean).join(" · ");
 }
 
 function slipIdToHex(slipId: string) {
@@ -508,8 +535,8 @@ async function handleTelegramCallback(callback: TelegramCallbackQuery) {
     return;
   }
 
-  // ลบปุ่มออกจากข้อความสลิปเดิม + ดึงโควตา LINE พร้อมกัน
-  const [, quota] = await Promise.all([
+  // ลบปุ่มออกจากข้อความสลิปเดิม + ดึงโควตา LINE/SlipOK พร้อมกัน
+  const [, quota, slipOkQuota, slipOkUsedThisMonth] = await Promise.all([
     callback.message?.chat?.id && callback.message.message_id
       ? callTelegram(settings, "editMessageReplyMarkup", {
           chat_id: callback.message.chat.id,
@@ -517,7 +544,9 @@ async function handleTelegramCallback(callback: TelegramCallbackQuery) {
           reply_markup: { inline_keyboard: [] }
         }).catch(() => null)
       : Promise.resolve(null),
-    getLineMessageQuota().catch(() => null)
+    getLineMessageQuota().catch(() => null),
+    getSlipOkQuota(settings).catch(() => null),
+    getSlipOkUsedThisMonth().catch(() => null)
   ]);
 
   const text = action === "verified" ? "อนุมัติสลิปแล้ว" : "ปฏิเสธสลิปแล้ว";
@@ -527,12 +556,12 @@ async function handleTelegramCallback(callback: TelegramCallbackQuery) {
   }).catch(() => null);
 
   if (callback.message?.chat?.id) {
-    const quotaLine = quota
-      ? quota.type === "none"
-        ? `📨 โควตา LINE: ไม่จำกัด (ใช้แล้ว ${quota.used.toLocaleString("th-TH")})`
-        : `📨 โควตา LINE: เหลือ ${Number(quota.remaining ?? 0).toLocaleString("th-TH")}/${Number(quota.limit ?? 0).toLocaleString("th-TH")} ข้อความ (ใช้แล้ว ${quota.used.toLocaleString("th-TH")})`
-      : null;
-    const lines = [`${text} โดย ${compactName(callback.from)}`, quotaLine].filter(Boolean);
+    const quotaLine = formatTelegramLineQuota(quota);
+    const slipOkLine = formatTelegramSlipOkQuota({
+      quota: slipOkQuota,
+      usedThisMonth: slipOkUsedThisMonth
+    });
+    const lines = [`${text} โดย ${compactName(callback.from)}`, quotaLine, slipOkLine].filter(Boolean);
     await callTelegram(settings, "sendMessage", {
       chat_id: callback.message.chat.id,
       text: lines.join("\n")
