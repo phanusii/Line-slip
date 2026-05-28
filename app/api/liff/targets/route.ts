@@ -19,9 +19,10 @@ export async function GET(request: NextRequest) {
     const supabase = createServiceClient();
     const { data, error } = await supabase
       .from("payment_targets")
-      .select("id,display_name,amount_due,status,selected_line_user_id,created_at")
+      .select("id,display_name,amount_due,status,selected_line_user_id,sort_order,created_at")
       .eq("event_id", eventId)
       .neq("status", "deleted")
+      .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true })
       .limit(500);
 
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       targets: (data ?? []).map((target, idx) => ({
         id: target.id,
-        order: idx + 1,
+        order: target.sort_order ?? idx + 1,
         display_name: target.display_name,
         amount_due: Number(target.amount_due),
         status: target.status,

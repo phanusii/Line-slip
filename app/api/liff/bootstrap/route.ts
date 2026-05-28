@@ -23,10 +23,11 @@ function mapTarget(target: {
   amount_due: number | string;
   status: string;
   selected_line_user_id?: string | null;
+  sort_order?: number | null;
 }, order: number) {
   return {
     id: target.id,
-    order,
+    order: target.sort_order ?? order,
     display_name: target.display_name,
     amount_due: Number(target.amount_due),
     status: target.status,
@@ -87,9 +88,10 @@ async function getOpenEventsWithFirstTargets(supabase: ReturnType<typeof createS
   const { data: targets, error: targetsError } = firstEventId
     ? await supabase
         .from("payment_targets")
-        .select("id,display_name,amount_due,status,selected_line_user_id,created_at")
+        .select("id,display_name,amount_due,status,selected_line_user_id,sort_order,created_at")
         .eq("event_id", firstEventId)
         .neq("status", "deleted")
+        .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true })
         .limit(500)
     : { data: [], error: null };

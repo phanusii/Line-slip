@@ -865,7 +865,8 @@ async function sendTargetsListByEvent(
   }
 
   const { data: targets, error, count } = await targetsQuery
-    .order("display_name")
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true })
     .range(from, to);
   if (error) throw error;
 

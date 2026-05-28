@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("events")
       .select(
-        "id,name,slug,promptpay_id,promptpay_type,is_open,archived_at,payment_targets(id,display_name,amount_due,status,selected_line_user_id,created_at)"
+        "id,name,slug,promptpay_id,promptpay_type,is_open,archived_at,payment_targets(id,display_name,amount_due,status,selected_line_user_id,sort_order,created_at)"
       )
       .eq("is_open", true)
       .is("archived_at", null)
@@ -47,12 +47,15 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       events: data.map((event) => {
-        // เรียงตาม created_at จากเก่าไปใหม่ เพื่อรักษาลำดับที่สร้าง
+        // เรียงตามลำดับรายชื่อที่สร้างไว้ และ fallback ด้วย created_at สำหรับข้อมูลเก่า
         const sorted = (event.payment_targets ?? [])
           .filter((target) => target.status !== "verified" && target.status !== "deleted")
-          .sort((a, b) =>
-            new Date(a.created_at as string).getTime() - new Date(b.created_at as string).getTime()
-          );
+          .sort((a, b) => {
+            const orderA = Number(a.sort_order ?? Number.MAX_SAFE_INTEGER);
+            const orderB = Number(b.sort_order ?? Number.MAX_SAFE_INTEGER);
+            if (orderA !== orderB) return orderA - orderB;
+            return new Date(a.created_at as string).getTime() - new Date(b.created_at as string).getTime();
+          });
         return {
           id: event.id,
           name: event.name,
@@ -60,7 +63,7 @@ export async function GET(request: NextRequest) {
           has_promptpay: Boolean(event.promptpay_id),
           targets: sorted.map((target, idx) => ({
             id: target.id,
-            order: idx + 1,
+            order: target.sort_order ?? idx + 1,
             display_name: target.display_name,
             amount_due: Number(target.amount_due),
             status: target.status,

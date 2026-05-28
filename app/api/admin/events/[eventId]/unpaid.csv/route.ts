@@ -20,7 +20,9 @@ export async function GET(
         .select("display_name,amount_due,status,note")
         .eq("event_id", eventId)
         .neq("status", "verified")
-        .order("display_name")
+        .neq("status", "deleted")
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true })
     ]);
 
     if (event.error) throw event.error;

@@ -108,7 +108,9 @@ type EventDetail = {
     id: string;
     display_name: string;
     amount_due: number;
+    note: string | null;
     status: string;
+    sort_order: number;
     paid_at: string | null;
   }>;
   slips: Array<{
@@ -149,6 +151,7 @@ type EventDetail = {
 
 type CleanupMode = "files" | "files_and_metadata" | "event";
 type SlipRow = EventDetail["slips"][number];
+type TargetRow = EventDetail["targets"][number];
 type PreviewSlip = { url: string; slip: SlipRow };
 
 const exampleTargetsText = `สมชาย\t500
@@ -290,6 +293,14 @@ export default function Home() {
     display_name: string;
     amount_due: number;
   } | null>(null);
+  const [targetEditor, setTargetEditor] = useState<{
+    mode: "create" | "edit";
+    target?: TargetRow;
+  } | null>(null);
+  const [targetFormName, setTargetFormName] = useState("");
+  const [targetFormAmount, setTargetFormAmount] = useState("");
+  const [targetFormNote, setTargetFormNote] = useState("");
+  const [targetDelete, setTargetDelete] = useState<TargetRow | null>(null);
   const [manualSlipFile, setManualSlipFile] = useState<File | null>(null);
   const [manualSlipNote, setManualSlipNote] = useState("");
   const [activePage, setActivePage] = useState("overview");
@@ -790,6 +801,90 @@ export default function Home() {
         setDetail(await api<EventDetail>(`/api/admin/events/${selectedEventId}`));
       }
       await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openCreateTarget() {
+    setTargetEditor({ mode: "create" });
+    setTargetFormName("");
+    setTargetFormAmount("");
+    setTargetFormNote("");
+    setError(null);
+  }
+
+  function openEditTarget(target: TargetRow) {
+    if (target.status === "verified") {
+      setError("รายชื่อนี้จ่ายแล้ว จึงแก้ไขไม่ได้");
+      return;
+    }
+    setTargetEditor({ mode: "edit", target });
+    setTargetFormName(target.display_name);
+    setTargetFormAmount(String(target.amount_due ?? ""));
+    setTargetFormNote(target.note ?? "");
+    setError(null);
+  }
+
+  function closeTargetEditor() {
+    setTargetEditor(null);
+    setTargetFormName("");
+    setTargetFormAmount("");
+    setTargetFormNote("");
+  }
+
+  async function refreshSelectedEvent() {
+    if (selectedEventId) {
+      setDetail(await api<EventDetail>(`/api/admin/events/${selectedEventId}`));
+    }
+    await loadAll();
+  }
+
+  async function saveTarget() {
+    if (!targetEditor || !selectedEventId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const payload = {
+        display_name: targetFormName,
+        amount_due: targetFormAmount,
+        note: targetFormNote
+      };
+      if (targetEditor.mode === "create") {
+        await api(`/api/admin/events/${selectedEventId}/targets`, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+      } else if (targetEditor.target) {
+        await api(`/api/admin/targets/${targetEditor.target.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload)
+        });
+      }
+      closeTargetEditor();
+      await refreshSelectedEvent();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteTarget() {
+    if (!targetDelete) return;
+    if (targetDelete.status === "verified") {
+      setError("รายชื่อนี้จ่ายแล้ว จึงลบไม่ได้");
+      setTargetDelete(null);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/api/admin/targets/${targetDelete.id}`, { method: "DELETE" });
+      setTargetDelete(null);
+      await refreshSelectedEvent();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1300,9 +1395,19 @@ export default function Home() {
                   <h2>{selectedEvent.name}</h2>
                   <p className="muted">รายชื่อการชำระเงิน</p>
                 </div>
-                <span className="circleIcon">
-                  <Users size={20} />
-                </span>
+                <div className="actions">
+                  <button
+                    className="btn primary"
+                    disabled={!adminUser || adminUser.role !== "admin" || busy}
+                    onClick={openCreateTarget}
+                  >
+                    <Plus size={15} />
+                    เพิ่มรายชื่อ
+                  </button>
+                  <span className="circleIcon">
+                    <Users size={20} />
+                  </span>
+                </div>
               </div>
               <div className="segmented">
                 {(
@@ -1339,7 +1444,7 @@ export default function Home() {
                   <tbody>
                     {targetRows.map((target, idx) => (
                       <tr key={target.id}>
-                        <td style={{ color: "var(--muted)", fontSize: 12, width: 32 }}>{idx + 1}</td>
+                        <td style={{ color: "var(--muted)", fontSize: 12, width: 32 }}>{target.sort_order || idx + 1}</td>
                         <td>{target.display_name}</td>
                         <td>{formatMoney(target.amount_due)}</td>
                         <td>
@@ -1348,15 +1453,35 @@ export default function Home() {
                           </span>
                         </td>
                         <td>
-                          {target.status !== "verified" && (
-                            <button
-                              className="btn subtle"
-                              style={{ fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}
-                              onClick={() => setManualSlipModal(target)}
-                            >
-                              + เพิ่มสลิป
-                            </button>
-                          )}
+                          <div className="actions">
+                            {target.status !== "verified" ? (
+                              <>
+                                <button
+                                  className="btn subtle"
+                                  style={{ fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}
+                                  onClick={() => openEditTarget(target)}
+                                >
+                                  แก้ไข
+                                </button>
+                                <button
+                                  className="btn subtle"
+                                  style={{ fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}
+                                  onClick={() => setManualSlipModal(target)}
+                                >
+                                  + เพิ่มสลิป
+                                </button>
+                                <button
+                                  className="btn danger"
+                                  style={{ fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}
+                                  onClick={() => setTargetDelete(target)}
+                                >
+                                  ลบ
+                                </button>
+                              </>
+                            ) : (
+                              <span className="muted" style={{ fontSize: 12 }}>จ่ายแล้ว ล็อกข้อมูล</span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1369,7 +1494,7 @@ export default function Home() {
                     <div className="mobileRecordHeader">
                       <div>
                         <h3>
-                          <span style={{ color: "var(--muted)", fontWeight: 500, fontSize: 12, marginRight: 4 }}>{idx + 1}.</span>
+                          <span style={{ color: "var(--muted)", fontWeight: 500, fontSize: 12, marginRight: 4 }}>{target.sort_order || idx + 1}.</span>
                           {target.display_name}
                         </h3>
                         <p>{formatMoney(target.amount_due)} บาท</p>
@@ -1379,13 +1504,29 @@ export default function Home() {
                           {statusLabels[target.status] ?? target.status}
                         </span>
                         {target.status !== "verified" && (
-                          <button
-                            className="btn subtle"
-                            style={{ fontSize: 12, padding: "4px 10px" }}
-                            onClick={() => setManualSlipModal(target)}
-                          >
-                            + เพิ่มสลิป
-                          </button>
+                          <div className="actions" style={{ justifyContent: "flex-end" }}>
+                            <button
+                              className="btn subtle"
+                              style={{ fontSize: 12, padding: "4px 10px" }}
+                              onClick={() => openEditTarget(target)}
+                            >
+                              แก้ไข
+                            </button>
+                            <button
+                              className="btn subtle"
+                              style={{ fontSize: 12, padding: "4px 10px" }}
+                              onClick={() => setManualSlipModal(target)}
+                            >
+                              + เพิ่มสลิป
+                            </button>
+                            <button
+                              className="btn danger"
+                              style={{ fontSize: 12, padding: "4px 10px" }}
+                              onClick={() => setTargetDelete(target)}
+                            >
+                              ลบ
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -2151,6 +2292,100 @@ export default function Home() {
                 onClick={createEvent}
               >
                 {busy ? "กำลังสร้าง" : "สร้างงานเก็บเงิน"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {targetEditor ? (
+        <div className="modalBackdrop">
+          <div className="modal">
+            <div>
+              <span className="badge ok">
+                {targetEditor.mode === "create" ? "เพิ่มรายชื่อ" : "แก้ไขรายชื่อ"}
+              </span>
+              <h3>{targetEditor.mode === "create" ? "เพิ่มรายชื่อในงานนี้" : "แก้ชื่อและยอดเงิน"}</h3>
+              <p className="muted">
+                {targetEditor.mode === "create"
+                  ? "รายชื่อใหม่จะต่อท้ายลำดับเดิมของงานนี้"
+                  : "แก้ได้เฉพาะรายชื่อที่ยังไม่จ่ายหรือยังรอตรวจเท่านั้น"}
+              </p>
+            </div>
+            <label className="field">
+              <span>ชื่อ</span>
+              <input
+                value={targetFormName}
+                onChange={(event) => setTargetFormName(event.target.value)}
+                placeholder="ชื่อผู้จ่าย"
+                autoFocus
+              />
+            </label>
+            <label className="field">
+              <span>ยอดเงิน</span>
+              <input
+                inputMode="decimal"
+                value={targetFormAmount}
+                onChange={(event) => setTargetFormAmount(event.target.value)}
+                placeholder="เช่น 100"
+              />
+            </label>
+            <label className="field">
+              <span>หมายเหตุ <span className="muted">(ไม่บังคับ)</span></span>
+              <input
+                value={targetFormNote}
+                onChange={(event) => setTargetFormNote(event.target.value)}
+                placeholder="เช่น เพิ่มภายหลัง"
+              />
+            </label>
+            {targetEditor.mode === "edit" ? (
+              <div className="warningBand">
+                <ShieldCheck size={18} />
+                <span>ถ้ารายชื่อนี้จ่ายแล้ว ระบบจะไม่อนุญาตให้แก้ไขจากทั้งหน้าเว็บและ API</span>
+              </div>
+            ) : null}
+            <div className="actions modalActions">
+              <button className="btn" onClick={closeTargetEditor}>
+                ยกเลิก
+              </button>
+              <button
+                className="btn primary"
+                disabled={!targetFormName.trim() || !targetFormAmount.trim() || busy}
+                onClick={saveTarget}
+              >
+                {busy ? "กำลังบันทึก..." : "บันทึก"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {targetDelete ? (
+        <div className="modalBackdrop">
+          <div className="modal">
+            <div>
+              <span className="badge danger">ลบรายชื่อ</span>
+              <h3>ลบรายชื่อออกจากงาน</h3>
+            </div>
+            <div className="alertPanel">
+              <p>
+                ต้องการลบ <strong>{targetDelete.display_name}</strong> ยอด{" "}
+                <strong>{formatMoney(targetDelete.amount_due)} บาท</strong> ออกจากงานนี้ใช่ไหม
+              </p>
+              <p className="muted">
+                ถ้ารายชื่อนี้จ่ายแล้ว ระบบจะไม่อนุญาตให้ลบ เพื่อรักษาประวัติการจ่ายและสลิป
+              </p>
+            </div>
+            <div className="actions modalActions">
+              <button className="btn" onClick={() => setTargetDelete(null)}>
+                ยกเลิก
+              </button>
+              <button
+                className="btn danger"
+                disabled={busy || targetDelete.status === "verified"}
+                onClick={deleteTarget}
+              >
+                {busy ? "กำลังลบ..." : "ยืนยันลบรายชื่อ"}
               </button>
             </div>
           </div>

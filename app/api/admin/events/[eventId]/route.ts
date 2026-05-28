@@ -19,6 +19,8 @@ export async function GET(
         .from("payment_targets")
         .select("*")
         .eq("event_id", eventId)
+        .neq("status", "deleted")
+        .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true }),
       supabase
         .from("slip_submissions")

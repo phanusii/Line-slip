@@ -19,7 +19,9 @@ export async function GET(
         .from("payment_targets")
         .select("display_name,amount_due,status,paid_at,note")
         .eq("event_id", eventId)
-        .order("display_name")
+        .neq("status", "deleted")
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true })
     ]);
 
     if (event.error) throw event.error;
