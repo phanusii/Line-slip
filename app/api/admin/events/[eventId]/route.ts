@@ -14,7 +14,7 @@ export async function GET(
     const supabase = createServiceClient();
 
     const [event, targets, slips] = await Promise.all([
-      supabase.from("events").select("*").eq("id", eventId).single(),
+      supabase.from("events").select("*").eq("id", eventId).maybeSingle(),
       supabase
         .from("payment_targets")
         .select("*")
@@ -29,6 +29,9 @@ export async function GET(
     ]);
 
     if (event.error) throw event.error;
+    if (!event.data) {
+      return NextResponse.json({ error: "ไม่พบงานนี้ หรืออาจถูกลบไปแล้ว" }, { status: 404 });
+    }
     if (targets.error) throw targets.error;
     if (slips.error) throw slips.error;
 
@@ -88,9 +91,12 @@ export async function DELETE(
       .from("events")
       .select("id,name,slug")
       .eq("id", eventId)
-      .single();
+      .maybeSingle();
 
     if (eventError) throw eventError;
+    if (!event) {
+      return NextResponse.json({ ok: true, alreadyDeleted: true, deleted_files: 0 });
+    }
 
     if (!body.confirmName || body.confirmName !== event.name) {
       return NextResponse.json(

@@ -651,10 +651,15 @@ export default function Home() {
       ]);
       setUsage(usageData);
       setEvents(eventsData.events);
-      const activeId = selectedEventId ?? eventsData.events[0]?.id ?? null;
+      const selectedStillExists = Boolean(
+        selectedEventId && eventsData.events.some((event) => event.id === selectedEventId)
+      );
+      const activeId = selectedStillExists ? selectedEventId : eventsData.events[0]?.id ?? null;
       setSelectedEventId(activeId);
       if (activeId) {
         setDetail(await api<EventDetail>(`/api/admin/events/${activeId}`));
+      } else {
+        setDetail(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
