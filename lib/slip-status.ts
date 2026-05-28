@@ -130,7 +130,12 @@ async function notifyLineUserAfterReview(input: {
   const supabase = createServiceClient();
   if (input.status !== "verified" || !input.target) return;
 
-  const settings = await getSettings(["line_push_policy", "telegram_bot_token", "telegram_chat_id"]);
+  const settings = await getSettings([
+    "line_push_policy",
+    "telegram_bot_token",
+    "telegram_chat_id",
+    "admin_review_token_secret"
+  ]);
   const eventRow = Array.isArray(input.target.events) ? input.target.events[0] : input.target.events;
   const eventName = eventRow?.name ?? "รายการชำระเงิน";
   const displayName = input.target.display_name;
@@ -203,7 +208,8 @@ async function notifyLineUserAfterReview(input: {
     result,
     displayName,
     eventName,
-    amountDue
+    amountDue,
+    eventId: input.eventId
   }).catch((error) => ({
     ok: false,
     error: error instanceof Error ? error.message : String(error)
