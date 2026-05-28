@@ -1,5 +1,5 @@
 import type { LineMessageQuota } from "@/lib/line";
-import type { SettingsMap } from "@/lib/settings";
+import { getSettings, type SettingsMap } from "@/lib/settings";
 import { getSlipOkQuota, getSlipOkUsedThisMonth } from "@/lib/slipok";
 
 type ApprovalNoticeResult = {
@@ -32,8 +32,16 @@ function formatQuota(quota?: LineMessageQuota | null) {
 }
 
 async function formatSlipOkQuota(settings: SettingsMap) {
+  const slipOkSettings = await getSettings([
+    "slipok_api_key",
+    "slipok_branch_id",
+    "slipok_log_enabled",
+    "slipok_auto_approve_enabled",
+    "slip_verification_provider"
+  ]);
+  const mergedSettings = { ...settings, ...slipOkSettings };
   const [quota, usedThisMonth] = await Promise.all([
-    getSlipOkQuota(settings).catch(() => null),
+    getSlipOkQuota(mergedSettings).catch(() => null),
     getSlipOkUsedThisMonth().catch(() => 0)
   ]);
   if (!quota) return "ไม่ทราบ";
@@ -67,8 +75,7 @@ async function buildNoticeText(settings: SettingsMap, input: {
     `งาน: ${input.eventName}`,
     `ชื่อ: ${input.displayName}`,
     `ยอด: ${formatAmount(input.amountDue)} บาท`,
-    `โควตาก่อนส่ง: ${formatQuota(input.result.quotaBefore)}`,
-    `โควตาหลังส่ง: ${formatQuota(input.result.quotaAfter ?? input.result.quotaBefore)}`,
+    `โควตา LINE หลังส่ง: ${formatQuota(input.result.quotaAfter ?? input.result.quotaBefore)}`,
     `โควตา SlipOK: ${slipOkQuota}`,
     input.result.error ? `หมายเหตุ: ${input.result.error}` : null
   ].filter(Boolean).join("\n");
