@@ -250,7 +250,7 @@ async function compressSlipFile(file: File) {
   const objectUrl = URL.createObjectURL(file);
   try {
     const image = await loadImageFromObjectUrl(objectUrl);
-    const maxEdge = 1600;
+    const maxEdge = 1280;
     const scale = Math.min(1, maxEdge / Math.max(image.naturalWidth, image.naturalHeight));
     const width = Math.max(1, Math.round(image.naturalWidth * scale));
     const height = Math.max(1, Math.round(image.naturalHeight * scale));
@@ -263,7 +263,7 @@ async function compressSlipFile(file: File) {
     context.drawImage(image, 0, 0, width, height);
 
     const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/jpeg", 0.82)
+      canvas.toBlob(resolve, "image/jpeg", 0.72)
     );
     if (!blob) return file;
     if (blob.size >= file.size && scale === 1) return file;
@@ -806,6 +806,7 @@ function PaymentAndSlipCard(props: {
   const isVerified = props.result.target.status === "verified";
   const uploadAllowed = canUploadSlip(props.result.target.status);
   const currentStatus = props.result.target.status ? statusText[props.result.target.status] ?? props.result.target.status : "สร้าง QR แล้ว";
+  const justUploaded = props.uploadState.phase === "done" && props.slipPreviewUrl;
 
   return (
     <section className="liffCard qrCard">
@@ -819,9 +820,25 @@ function PaymentAndSlipCard(props: {
       {isVerified ? (
         <p className="muted">รายการนี้จ่ายเรียบร้อยแล้ว ไม่ต้องส่งสลิปเพิ่ม</p>
       ) : !uploadAllowed ? (
-        <p className="muted">
-          ระบบได้รับสลิปแล้ว สถานะปัจจุบันคือ {currentStatus} ไม่ต้องอัปโหลดสลิปซ้ำ
-        </p>
+        <>
+          <p className="muted">
+            ระบบได้รับสลิปแล้ว สถานะปัจจุบันคือ {currentStatus} ไม่ต้องอัปโหลดสลิปซ้ำ
+          </p>
+          {justUploaded ? (
+            <div className={`liffSlipPreview ${props.uploadState.phase}`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={props.slipPreviewUrl ?? ""} alt="รูปสลิปที่ส่งแล้ว" />
+              <div>
+                <strong>อัปโหลดสลิปเสร็จแล้ว</strong>
+                {props.slipFile ? <p className="liffFileName">{props.slipFile.name}</p> : null}
+                {props.uploadState.message ? <p>{props.uploadState.message}</p> : null}
+                <div className="liffProgress" aria-label="อัปโหลด 100%">
+                  <span style={{ width: "100%" }} />
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </>
       ) : (
         <>
           <p className="muted">ถ่ายหน้าจอ QR นี้หรือสแกนจ่าย จากนั้นอัปโหลดสลิปด้านล่าง</p>

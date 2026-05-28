@@ -26,11 +26,19 @@ export type UploadSlipResult = {
   duplicateOfId?: string;
 };
 
-export async function normalizeSlipImage(source: Buffer) {
+function canReuseUploadedJpeg(source: Buffer, mimeType?: string | null) {
+  const normalizedMime = mimeType?.toLowerCase() ?? "";
+  const isJpeg = normalizedMime === "image/jpeg" || normalizedMime === "image/jpg";
+  return isJpeg && source.byteLength <= 900_000;
+}
+
+export async function normalizeSlipImage(source: Buffer, mimeType?: string | null) {
+  if (canReuseUploadedJpeg(source, mimeType)) return source;
+
   return sharp(source, { failOn: "none" })
     .rotate()
-    .resize({ width: 1600, withoutEnlargement: true })
-    .jpeg({ quality: 78, mozjpeg: true })
+    .resize({ width: 1280, withoutEnlargement: true })
+    .jpeg({ quality: 72, mozjpeg: true })
     .toBuffer();
 }
 
@@ -160,9 +168,9 @@ export async function readSlipQrPayload(buffer: Buffer) {
 
 export async function uploadSlipImage(input: UploadSlipInput) {
   const supabase = createServiceClient();
-  const normalized = await normalizeSlipImage(input.sourceBuffer);
+  const normalized = await normalizeSlipImage(input.sourceBuffer, input.mimeType);
   const imageHash = hashImage(normalized);
-  const slipQrPayload = await readSlipQrPayload(input.sourceBuffer).catch(() => null);
+  const slipQrPayload = await readSlipQrPayload(normalized).catch(() => null);
   const slipRef = slipQrPayload
     ? `qr:${crypto.createHash("sha256").update(slipQrPayload).digest("hex")}`
     : null;

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { formatApiError } from "@/lib/api-error";
 import { notifyAdminSlipReview } from "@/lib/admin-review";
-import { getLineProfile, verifyLineAccessToken } from "@/lib/liff";
+import { verifyAndGetProfile } from "@/lib/liff";
 import { uploadSlipImage } from "@/lib/slips";
 import { createServiceClient } from "@/lib/supabase/server";
 
@@ -16,8 +17,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "ข้อมูลสลิปไม่ครบ กรุณาเลือกไฟล์ใหม่" }, { status: 400 });
     }
 
-    await verifyLineAccessToken(accessToken);
-    const profile = await getLineProfile(accessToken);
+    const profile = await verifyAndGetProfile(accessToken);
     const supabase = createServiceClient();
 
     const { data: lineUser, error: lineUserError } = await supabase
@@ -98,11 +98,11 @@ export async function POST(request: NextRequest) {
       notifyAdmin: false
     });
 
-    // แจ้งเตือนแอดมินแบบ synchronous (ก่อน return) — after() ไม่น่าเชื่อถือบน Vercel Hobby
-    // เพราะ Lambda ถูก terminate หลัง response sent ทำให้ callback ไม่ทำงาน
     if (slip.id && slip.status === "manual_review") {
-      await notifyAdminSlipReview(slip.id).catch((notifyError) => {
-        console.error("slip review notification failed", notifyError);
+      after(async () => {
+        await notifyAdminSlipReview(slip.id as string).catch((notifyError) => {
+          console.error("slip review notification failed", notifyError);
+        });
       });
     }
 
