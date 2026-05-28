@@ -112,7 +112,9 @@ export async function POST(request: NextRequest) {
       message:
         slip.status === "duplicate_blocked"
           ? "สลิปนี้เคยส่งแล้ว ระบบไม่บันทึกซ้ำ"
-          : "รับสลิปแล้ว รอแอดมินตรวจ"
+          : slip.status === "verified"
+            ? "ตรวจสลิปผ่านแล้ว ระบบบันทึกว่าจ่ายแล้ว"
+            : "รับสลิปแล้ว รอแอดมินตรวจ"
     });
   } catch (error) {
     return NextResponse.json({ error: formatApiError(error) }, { status: 500 });

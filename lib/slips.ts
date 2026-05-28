@@ -3,6 +3,16 @@ import jsQR from "jsqr";
 import sharp from "sharp";
 import { notifyAdminSlipReview } from "@/lib/admin-review";
 import { STORAGE_BUCKET } from "@/lib/env";
+import { applySlipStatus } from "@/lib/slip-status";
+import { getBooleanSetting, getSettings, getSlipVerificationProvider } from "@/lib/settings";
+import {
+  disableSlipOkToManual,
+  getSlipOkQuota,
+  isSlipOkQuotaExhausted,
+  recordSlipOkUsage,
+  type SlipOkQuotaSnapshot,
+  verifySlipWithSlipOk
+} from "@/lib/slipok";
 import { createServiceClient } from "@/lib/supabase/server";
 
 type UploadSlipInput = {
@@ -20,10 +30,25 @@ type UploadSlipInput = {
 
 export type UploadSlipResult = {
   id?: string;
-  status: "manual_review" | "duplicate_blocked";
+  status: "manual_review" | "verified" | "duplicate_blocked";
   autoCheckStatus?: string | null;
   autoCheckReasons?: string[];
   duplicateOfId?: string;
+};
+
+type ProviderCheck = {
+  verificationProvider: "manual" | "slipok";
+  checkStatus: string;
+  reasons: string[];
+  amountDetected: number | null;
+  response: unknown;
+  reference: string | null;
+  checkedAt: string | null;
+  shouldAutoApprove: boolean;
+  quotaBefore?: SlipOkQuotaSnapshot | null;
+  quotaAfter?: SlipOkQuotaSnapshot | null;
+  usageStatus?: string | null;
+  disableReason?: string | null;
 };
 
 function canReuseUploadedJpeg(source: Buffer, mimeType?: string | null) {
@@ -193,6 +218,12 @@ export async function uploadSlipImage(input: UploadSlipInput) {
     } satisfies UploadSlipResult;
   }
 
+  const providerCheck = await runProviderCheck({
+    imageBuffer: normalized,
+    amountExpected: input.amountExpected,
+    fallbackReference: slipRef
+  });
+
   // Use payment_target_id (UUID) instead of person name — avoids Thai-character URL encoding issues
   const path = `events/${input.eventId}/manual_review/${targetSegment}_${amount}_${datePart}_${imageHash.slice(0, 12)}.jpg`;
   // Human-readable name kept only for download Content-Disposition
@@ -224,10 +255,16 @@ export async function uploadSlipImage(input: UploadSlipInput) {
       image_hash: imageHash,
       slip_ref: slipRef,
       amount_expected: input.amountExpected ?? null,
+      amount_detected: providerCheck.amountDetected,
       status: "manual_review",
-      auto_check_status: "disabled",
-      auto_check_reasons: ["manual_review_only"],
-      auto_checked_at: new Date().toISOString()
+      auto_check_status: providerCheck.checkStatus,
+      auto_check_reasons: providerCheck.reasons,
+      auto_checked_at: providerCheck.checkedAt,
+      verification_provider: providerCheck.verificationProvider,
+      provider_check_status: providerCheck.checkStatus,
+      provider_response: providerCheck.response,
+      provider_checked_at: providerCheck.checkedAt,
+      provider_reference: providerCheck.reference
     })
     .select("*")
     .single();
@@ -284,6 +321,41 @@ export async function uploadSlipImage(input: UploadSlipInput) {
       .neq("status", "verified");
   }
 
+  if (providerCheck.verificationProvider === "slipok" && providerCheck.usageStatus) {
+    await recordSlipOkUsage({
+      slipId: inserted.data.id,
+      quotaBefore: providerCheck.quotaBefore,
+      quotaAfter: providerCheck.quotaAfter,
+      providerStatus: providerCheck.usageStatus
+    }).catch((usageError) => {
+      console.error("slipok usage log failed", usageError);
+    });
+  }
+
+  if (providerCheck.disableReason) {
+    await disableSlipOkToManual(providerCheck.disableReason).catch((disableError) => {
+      console.error("slipok auto disable failed", disableError);
+    });
+  }
+
+  if (providerCheck.shouldAutoApprove) {
+    const updatedSlip = await applySlipStatus({
+      slipId: inserted.data.id,
+      status: "verified",
+      reason: "SlipOK ตรวจสลิปผ่านและยอดตรง",
+      actor: { actor_email: "system-slipok", actor_role: "viewer" },
+      auditAction: "slipok_auto_verified",
+      source: "slipok"
+    });
+
+    return {
+      id: inserted.data.id,
+      status: "verified",
+      autoCheckStatus: updatedSlip.auto_check_status ?? providerCheck.checkStatus,
+      autoCheckReasons: providerCheck.reasons
+    } satisfies UploadSlipResult;
+  }
+
   if (input.notifyAdmin !== false) {
     await notifyAdminSlipReview(inserted.data.id).catch((notifyError) => {
       console.error("slip review notification failed", notifyError);
@@ -293,9 +365,123 @@ export async function uploadSlipImage(input: UploadSlipInput) {
   return {
     id: inserted.data.id,
     status: "manual_review",
-    autoCheckStatus: "disabled",
-    autoCheckReasons: ["manual_review_only"]
+    autoCheckStatus: providerCheck.checkStatus,
+    autoCheckReasons: providerCheck.reasons
   } satisfies UploadSlipResult;
+}
+
+async function runProviderCheck(input: {
+  imageBuffer: Buffer;
+  amountExpected?: number | null;
+  fallbackReference: string | null;
+}): Promise<ProviderCheck> {
+  const settings = await getSettings([
+    "slip_verification_provider",
+    "slipok_api_key",
+    "slipok_branch_id",
+    "slipok_log_enabled",
+    "slipok_auto_approve_enabled",
+    "telegram_bot_token",
+    "telegram_chat_id"
+  ]);
+  const provider = getSlipVerificationProvider(settings);
+  const manualCheck: ProviderCheck = {
+    verificationProvider: "manual",
+    checkStatus: "disabled",
+    reasons: ["manual_review_only"],
+    amountDetected: null,
+    response: null,
+    reference: input.fallbackReference,
+    checkedAt: new Date().toISOString(),
+    shouldAutoApprove: false
+  };
+
+  if (provider !== "slipok") return manualCheck;
+
+  const quotaBefore = await getSlipOkQuota(settings).catch((error) => ({
+    ok: false,
+    quota: null,
+    overQuota: null,
+    used: null,
+    remaining: null,
+    raw: null,
+    error: error instanceof Error ? error.message : String(error)
+  }) satisfies SlipOkQuotaSnapshot);
+
+  if (!quotaBefore.ok) {
+    return {
+      ...manualCheck,
+      verificationProvider: "slipok",
+      checkStatus: "quota_check_failed",
+      reasons: ["slipok_quota_check_failed"],
+      response: { quotaBefore },
+      usageStatus: "quota_check_failed"
+    };
+  }
+
+  if (isSlipOkQuotaExhausted(quotaBefore)) {
+    return {
+      ...manualCheck,
+      verificationProvider: "slipok",
+      checkStatus: "skipped_quota_exhausted",
+      reasons: ["slipok_quota_exhausted"],
+      response: { quotaBefore },
+      quotaBefore,
+      usageStatus: "skipped_quota_exhausted",
+      disableReason: "SlipOK quota หมดหรือเกินโควต้า ระบบจึงปิดกลับเป็น Manual"
+    };
+  }
+
+  const checkedAt = new Date().toISOString();
+  const verification = await verifySlipWithSlipOk({
+    settings,
+    imageBuffer: input.imageBuffer,
+    amountExpected: input.amountExpected
+  }).catch((error) => ({
+    ok: false,
+    passed: false,
+    checkStatus: "api_error",
+    reasons: ["slipok_api_error"],
+    amountDetected: null,
+    reference: null,
+    raw: null,
+    error: error instanceof Error ? error.message : String(error)
+  }));
+
+  const quotaAfter = await getSlipOkQuota(settings).catch((error) => ({
+    ok: false,
+    quota: null,
+    overQuota: null,
+    used: null,
+    remaining: null,
+    raw: null,
+    error: error instanceof Error ? error.message : String(error)
+  }) satisfies SlipOkQuotaSnapshot);
+  const shouldAutoApprove =
+    verification.passed &&
+    getBooleanSetting(settings, "slipok_auto_approve_enabled", true);
+
+  return {
+    verificationProvider: "slipok",
+    checkStatus: verification.passed ? "passed" : verification.checkStatus,
+    reasons: verification.reasons.length ? verification.reasons : ["slipok_manual_review"],
+    amountDetected: verification.amountDetected,
+    response: {
+      slipok: verification.raw,
+      error: verification.error ?? null,
+      quotaBefore,
+      quotaAfter
+    },
+    reference: verification.reference ?? input.fallbackReference,
+    checkedAt,
+    shouldAutoApprove,
+    quotaBefore,
+    quotaAfter,
+    usageStatus: verification.passed ? "passed" : verification.checkStatus,
+    disableReason: isSlipOkQuotaExhausted(quotaAfter)
+      ? "SlipOK quota หมดหรือเกินโควต้าหลังตรวจสลิป ระบบจึงปิดกลับเป็น Manual"
+      : null
+  };
 }
 
 export async function downloadLineContent(messageId: string) {

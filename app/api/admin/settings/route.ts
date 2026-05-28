@@ -56,6 +56,7 @@ function isSecretKey(key: SettingKey) {
   return (
     key === "telegram_bot_token" ||
     key === "telegram_webhook_secret" ||
-    key === "admin_review_token_secret"
+    key === "admin_review_token_secret" ||
+    key === "slipok_api_key"
   );
 }

@@ -75,6 +75,11 @@ create table public.slip_submissions (
   auto_check_reasons jsonb not null default '[]'::jsonb,
   auto_checked_at timestamptz,
   ocr_result jsonb,
+  verification_provider text,
+  provider_check_status text,
+  provider_response jsonb,
+  provider_checked_at timestamptz,
+  provider_reference text,
   file_deleted_at timestamptz,
   metadata_deleted_at timestamptz,
   created_at timestamptz not null default now(),
@@ -126,6 +131,22 @@ create index slip_submissions_auto_check_status_idx on public.slip_submissions(e
 create index slip_submissions_payment_target_created_idx on public.slip_submissions(payment_target_id, created_at desc) where metadata_deleted_at is null;
 create index slip_submissions_duplicate_of_idx on public.slip_submissions(duplicate_of_slip_id) where duplicate_of_slip_id is not null;
 create index slip_submissions_replaced_by_idx on public.slip_submissions(replaced_by_slip_id) where replaced_by_slip_id is not null;
+create index slip_submissions_provider_reference_idx on public.slip_submissions(provider_reference) where provider_reference is not null and metadata_deleted_at is null;
+
+create table public.slipok_usage_logs (
+  id uuid primary key default gen_random_uuid(),
+  slip_id uuid references public.slip_submissions(id) on delete set null,
+  month_key text not null,
+  quota_before integer,
+  quota_after integer,
+  over_quota integer,
+  used_delta integer not null default 0,
+  provider_status text,
+  created_at timestamptz not null default now()
+);
+
+create index slipok_usage_logs_month_idx on public.slipok_usage_logs(month_key, created_at desc);
+create index slipok_usage_logs_slip_idx on public.slipok_usage_logs(slip_id) where slip_id is not null;
 create index audit_logs_event_created_idx on public.audit_logs(event_id, created_at desc);
 
 create or replace function public.touch_updated_at()
@@ -161,6 +182,7 @@ alter table public.events enable row level security;
 alter table public.payment_targets enable row level security;
 alter table public.line_users enable row level security;
 alter table public.slip_submissions enable row level security;
+alter table public.slipok_usage_logs enable row level security;
 alter table public.admin_users enable row level security;
 alter table public.audit_logs enable row level security;
 
@@ -181,6 +203,11 @@ with check (auth.role() = 'service_role');
 
 create policy "admin service access slips"
 on public.slip_submissions for all
+using (auth.role() = 'service_role')
+with check (auth.role() = 'service_role');
+
+create policy "service_role_slipok_usage_logs_all"
+on public.slipok_usage_logs for all
 using (auth.role() = 'service_role')
 with check (auth.role() = 'service_role');
 
@@ -222,7 +249,14 @@ values
   ('auto_verify_window_hours', '24'),
   ('auto_verify_requires_unique_amount', 'true'),
   ('auto_verify_ocr_enabled', 'false'),
-  ('auto_verify_ocr_min_confidence', '45')
+  ('auto_verify_ocr_min_confidence', '45'),
+  ('slip_verification_provider', 'manual'),
+  ('slipok_api_key', ''),
+  ('slipok_branch_id', ''),
+  ('slipok_log_enabled', 'true'),
+  ('slipok_auto_approve_enabled', 'true'),
+  ('slipok_disabled_reason', ''),
+  ('slipok_disabled_at', '')
 on conflict (key) do nothing;
 
 -- Returns actual PostgreSQL database size in bytes (accurate, includes indexes and TOAST)

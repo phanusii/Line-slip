@@ -68,6 +68,25 @@ type LineQuota = {
   error?: string;
 };
 
+type SlipOkQuota = {
+  provider: "manual" | "slipok";
+  enabled: boolean;
+  quota?: {
+    ok: boolean;
+    quota: number | null;
+    overQuota: number | null;
+    used: number | null;
+    remaining: number | null;
+    error?: string;
+  };
+  usedThisMonth: number;
+  monthKey: string;
+  disabledReason?: string;
+  disabledAt?: string;
+  checkedAt: string;
+  error?: string;
+};
+
 type TelegramConnect = {
   bot?: { username?: string; first_name?: string };
   startUrl?: string;
@@ -108,6 +127,10 @@ type EventDetail = {
     auto_check_status: string | null;
     auto_check_reasons: string[] | null;
     auto_checked_at: string | null;
+    verification_provider: string | null;
+    provider_check_status: string | null;
+    provider_reference: string | null;
+    provider_checked_at: string | null;
     ocr_result: {
       enabled?: boolean;
       available?: boolean;
@@ -164,7 +187,14 @@ const autoReasonLabels: Record<string, string> = {
   qr_recipient_mismatch: "PromptPay ผู้รับใน QR ไม่ตรงกับงาน",
   free_auto_review_passed: "ผ่านทุกเงื่อนไข",
   duplicate_slip_qr: "QR สลิปซ้ำ",
-  duplicate_image_hash: "รูปสลิปซ้ำ"
+  duplicate_image_hash: "รูปสลิปซ้ำ",
+  slipok_verified: "SlipOK ตรวจผ่าน",
+  slipok_manual_review: "เข้าแอดมินตรวจ",
+  slipok_quota_check_failed: "เช็กโควต้า SlipOK ไม่สำเร็จ",
+  slipok_quota_exhausted: "โควต้า SlipOK หมด",
+  slipok_api_error: "SlipOK API ไม่สำเร็จ",
+  slipok_rejected: "SlipOK ไม่ผ่าน",
+  slipok_amount_mismatch: "ยอดไม่ตรงกับ SlipOK"
 };
 
 function percent(used: number, limit: number) {
@@ -279,6 +309,12 @@ export default function Home() {
   const [autoVerifyRequiresUniqueAmount, setAutoVerifyRequiresUniqueAmount] = useState(true);
   const [autoVerifyOcrEnabled, setAutoVerifyOcrEnabled] = useState(false);
   const [autoVerifyOcrMinConfidence, setAutoVerifyOcrMinConfidence] = useState("45");
+  const [slipVerificationProvider, setSlipVerificationProvider] = useState<"manual" | "slipok">("manual");
+  const [slipokApiKey, setSlipokApiKey] = useState("");
+  const [slipokBranchId, setSlipokBranchId] = useState("");
+  const [slipokLogEnabled, setSlipokLogEnabled] = useState(true);
+  const [slipokAutoApproveEnabled, setSlipokAutoApproveEnabled] = useState(true);
+  const [slipokQuota, setSlipokQuota] = useState<SlipOkQuota | null>(null);
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramChatId, setTelegramChatId] = useState("");
   const [telegramConnect, setTelegramConnect] = useState<TelegramConnect | null>(null);
@@ -422,6 +458,11 @@ export default function Home() {
       setAutoVerifyRequiresUniqueAmount(settingEnabled(settings.auto_verify_requires_unique_amount, true));
       setAutoVerifyOcrEnabled(settingEnabled(settings.auto_verify_ocr_enabled, false));
       setAutoVerifyOcrMinConfidence(settings.auto_verify_ocr_min_confidence ?? "45");
+      setSlipVerificationProvider(settings.slip_verification_provider === "slipok" ? "slipok" : "manual");
+      setSlipokApiKey(settings.slipok_api_key ?? "");
+      setSlipokBranchId(settings.slipok_branch_id ?? "");
+      setSlipokLogEnabled(settingEnabled(settings.slipok_log_enabled, true));
+      setSlipokAutoApproveEnabled(settingEnabled(settings.slipok_auto_approve_enabled, true));
       setTelegramBotToken(settings.telegram_bot_token ?? "");
       setTelegramChatId(settings.telegram_chat_id ?? "");
       setDiscordWebhookUrl(settings.discord_webhook_url ?? "");
@@ -429,6 +470,7 @@ export default function Home() {
       setAdminReviewTokenTtlHours(settings.admin_review_token_ttl_hours ?? "24");
       void loadTelegramConnect();
       void loadLineQuota();
+      void loadSlipOkQuota();
     } catch {
       // non-critical
     }
@@ -449,6 +491,11 @@ export default function Home() {
           auto_verify_requires_unique_amount: "false",
           auto_verify_ocr_enabled: "false",
           auto_verify_ocr_min_confidence: autoVerifyOcrMinConfidence,
+          slip_verification_provider: slipVerificationProvider,
+          slipok_api_key: slipokApiKey,
+          slipok_branch_id: slipokBranchId,
+          slipok_log_enabled: String(slipokLogEnabled),
+          slipok_auto_approve_enabled: String(slipokAutoApproveEnabled),
           telegram_bot_token: telegramBotToken,
           telegram_chat_id: telegramChatId,
           discord_webhook_url: discordWebhookUrl,
@@ -458,6 +505,7 @@ export default function Home() {
       });
       setContactUrlSaved(true);
       await loadTelegramConnect();
+      await loadSlipOkQuota();
       setTimeout(() => setContactUrlSaved(false), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -469,6 +517,14 @@ export default function Home() {
   async function loadLineQuota() {
     try {
       setLineQuota(await api<LineQuota>("/api/admin/line/quota"));
+    } catch {
+      // non-critical
+    }
+  }
+
+  async function loadSlipOkQuota() {
+    try {
+      setSlipokQuota(await api<SlipOkQuota>("/api/admin/slipok/quota"));
     } catch {
       // non-critical
     }
@@ -1540,89 +1596,96 @@ export default function Home() {
         <section className="panel" hidden={activePage !== "auto"}>
           <div className="panelHeader">
             <div>
-              <h2>ตรวจสลิปอัตโนมัติจากรูป</h2>
+              <h2>ตรวจสลิปอัตโนมัติด้วย SlipOK</h2>
               <p className="muted">
-                ใช้ OCR อ่านยอดทศนิยม 2 ตำแหน่งร่วมกับ QR บนสลิป, hash กันซ้ำ และเวลาเลือก QR วิธีนี้ไม่ใช่การยืนยันจากธนาคาร
+                เลือกได้ว่าจะให้แอดมินตรวจเอง หรือใช้ SlipOK ตรวจก่อนอนุมัติอัตโนมัติ เมื่อโควต้าหมดระบบจะกลับเป็น Manual ทันที
               </p>
             </div>
-            <span className={autoVerifyFromSlipEnabled ? "badge ok" : "badge"}>
-              {autoVerifyFromSlipEnabled ? "เปิดโหมดเข้มสุด" : "ปิดอยู่"}
+            <span className={slipVerificationProvider === "slipok" ? "badge ok" : "badge"}>
+              {slipVerificationProvider === "slipok" ? "SlipOK เปิดอยู่" : "Manual"}
             </span>
           </div>
 
           <div className="warningBand">
-            <AlertTriangle size={18} />
-            <span>
-              Auto verify นี้ตรวจจากหลักฐานในรูปเท่านั้น ถ้าต้องการยืนยันเงินจริง 100% ต้องใช้ statement หรือ bank API
-            </span>
+            <ShieldCheck size={18} />
+            <span>ระบบยังกันสลิปซ้ำด้วย hash/QR ก่อนเรียก SlipOK เพื่อไม่ให้เสียโควต้ากับรูปซ้ำ</span>
           </div>
 
-          {autoVerifyFromSlipEnabled && !telegramBotToken ? (
+          {slipVerificationProvider === "slipok" && !telegramBotToken ? (
             <div className="warningBand" style={{ background: "rgba(183, 121, 31, 0.08)", borderColor: "rgba(183, 121, 31, 0.3)" }}>
               <AlertTriangle size={18} />
               <span>
-                เปิด auto-verify แล้วแต่ยังไม่ได้ตั้ง Telegram Bot Token — admin จะไม่รับแจ้งเตือนสลิปที่ต้องตรวจ
+                เปิด SlipOK แล้วแต่ยังไม่ได้ตั้ง Telegram Bot Token — ถ้าโควต้าหมดระบบจะปิดอัตโนมัติ แต่อาจแจ้งเตือน Telegram ไม่ได้
                 ไปที่แท็บ "ตั้งค่า LINE" เพื่อเชื่อม Telegram
               </span>
             </div>
           ) : null}
 
           <div className="formGrid">
-            <label className="checkField">
-              <input
-                type="checkbox"
-                checked={autoVerifyFromSlipEnabled}
-                onChange={(e) => setAutoVerifyFromSlipEnabled(e.target.checked)}
-              />
-              <span>เปิด auto verify จากรูปสลิป</span>
-            </label>
-            <label className="checkField">
-              <input
-                type="checkbox"
-                checked={autoVerifyRequiresUniqueAmount}
-                onChange={(e) => setAutoVerifyRequiresUniqueAmount(e.target.checked)}
-              />
-              <span>ยอดนี้ต้องตรงกับรายชื่อนี้ในงานนี้เท่านั้น</span>
-            </label>
-            <label className="checkField">
-              <input
-                type="checkbox"
-                checked={autoVerifyOcrEnabled}
-                onChange={(e) => setAutoVerifyOcrEnabled(e.target.checked)}
-              />
-              <span>เปิด OCR เพื่อตรวจยอดในรูปสลิปด้วย</span>
+            <label className="field">
+              <span>โหมดตรวจสลิป</span>
+              <select
+                value={slipVerificationProvider}
+                onChange={(e) => setSlipVerificationProvider(e.target.value === "slipok" ? "slipok" : "manual")}
+              >
+                <option value="manual">Manual - แอดมินตรวจผ่าน Telegram/Dashboard</option>
+                <option value="slipok">SlipOK - ตรวจอัตโนมัติเมื่อโควต้าเหลือ</option>
+              </select>
             </label>
             <label className="field">
-              <span>ช่วงเวลาหลังสร้าง QR (ชั่วโมง)</span>
+              <span>SlipOK Branch ID</span>
               <input
-                inputMode="numeric"
-                value={autoVerifyWindowHours}
-                onChange={(e) => setAutoVerifyWindowHours(e.target.value)}
-                placeholder="24"
+                value={slipokBranchId}
+                onChange={(e) => setSlipokBranchId(e.target.value)}
+                placeholder="เลข branch จาก SlipOK"
               />
             </label>
-            {autoVerifyOcrEnabled ? (
-              <label className="field">
-                <span>OCR confidence ขั้นต่ำ (0–100)</span>
-                <input
-                  inputMode="numeric"
-                  value={autoVerifyOcrMinConfidence}
-                  onChange={(e) => setAutoVerifyOcrMinConfidence(e.target.value)}
-                  placeholder="45"
-                />
-              </label>
-            ) : null}
+            <label className="field">
+              <span>SlipOK API Key</span>
+              <input
+                value={slipokApiKey}
+                onChange={(e) => setSlipokApiKey(e.target.value)}
+                placeholder="เว้นว่างถ้าไม่เปลี่ยน หรือใช้ SLIPOK_API_KEY"
+              />
+            </label>
+            <label className="checkField">
+              <input
+                type="checkbox"
+                checked={slipokAutoApproveEnabled}
+                onChange={(e) => setSlipokAutoApproveEnabled(e.target.checked)}
+              />
+              <span>อนุมัติอัตโนมัติเมื่อ SlipOK ตรวจผ่านและยอดตรง</span>
+            </label>
+            <label className="checkField">
+              <input
+                type="checkbox"
+                checked={slipokLogEnabled}
+                onChange={(e) => setSlipokLogEnabled(e.target.checked)}
+              />
+              <span>ส่ง log ให้ SlipOK ช่วยตรวจบัญชีรับและสลิปซ้ำ</span>
+            </label>
           </div>
 
           <div className="hintBox">
-            <strong>เงื่อนไขที่ต้องผ่านสำหรับ auto-verify</strong>
-            <p>✅ ผู้ใช้เลือกชื่อผ่าน LIFF ก่อนส่งสลิป</p>
-            <p>✅ สลิปต้องมี QR code — QR ต้องไม่ซ้ำ และยอดใน QR ต้องตรงกับที่คาดไว้</p>
-            <p>✅ ส่งสลิปภายใน {autoVerifyWindowHours} ชั่วโมงหลังสร้าง QR</p>
-            <p>{autoVerifyRequiresUniqueAmount ? "✅" : "⬜"} ยอดต้องไม่ซ้ำกับรายชื่ออื่นในงาน</p>
-            <p>{autoVerifyOcrEnabled ? "✅ Tesseract OCR ตรวจยอดในรูปด้วย (ฟรี)" : "⬜ ไม่เปิด OCR — ใช้ QR + เงื่อนไขอื่น"}</p>
+            <strong>โควต้า SlipOK เดือนนี้</strong>
+            {slipokQuota ? (
+              <>
+                <p>ใช้ในระบบนี้แล้ว: {slipokQuota.usedThisMonth.toLocaleString("th-TH")} สลิป ({slipokQuota.monthKey})</p>
+                <p>
+                  โควต้าคงเหลือจาก SlipOK:{" "}
+                  {slipokQuota.quota?.remaining ?? slipokQuota.quota?.quota ?? "ไม่ทราบ"}
+                  {slipokQuota.quota?.overQuota ? ` · overQuota ${slipokQuota.quota.overQuota}` : ""}
+                </p>
+                {slipokQuota.disabledReason ? <p>เหตุผลที่ปิดล่าสุด: {slipokQuota.disabledReason}</p> : null}
+                {slipokQuota.quota?.error || slipokQuota.error ? (
+                  <p style={{ color: "var(--danger)" }}>{slipokQuota.quota?.error ?? slipokQuota.error}</p>
+                ) : null}
+              </>
+            ) : (
+              <p>กด “เช็กโควต้า SlipOK” เพื่อดึงโควต้าล่าสุด</p>
+            )}
             <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
-              ระบบนี้ตรวจจากหลักฐานในรูปเท่านั้น ไม่ใช่การยืนยันเงินจากธนาคาร
+              ถ้าโควต้าหมด ระบบจะบันทึกสลิปเป็นรอตรวจและส่งเข้า Telegram/Dashboard ตามปกติ
             </p>
           </div>
 
@@ -1633,6 +1696,9 @@ export default function Home() {
               onClick={saveSettings}
             >
               {contactUrlSaved ? "บันทึกแล้ว ✓" : "บันทึกตั้งค่า"}
+            </button>
+            <button className="btn subtle" onClick={loadSlipOkQuota}>
+              เช็กโควต้า SlipOK
             </button>
           </div>
         </section>

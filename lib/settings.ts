@@ -14,7 +14,14 @@ export const SETTING_KEYS = [
   "auto_verify_window_hours",
   "auto_verify_requires_unique_amount",
   "auto_verify_ocr_enabled",
-  "auto_verify_ocr_min_confidence"
+  "auto_verify_ocr_min_confidence",
+  "slip_verification_provider",
+  "slipok_api_key",
+  "slipok_branch_id",
+  "slipok_log_enabled",
+  "slipok_auto_approve_enabled",
+  "slipok_disabled_reason",
+  "slipok_disabled_at"
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -27,7 +34,9 @@ export type SettingsMap = Partial<Record<SettingKey, string>>;
 const ENV_FALLBACKS: Partial<Record<SettingKey, string | undefined>> = {
   telegram_bot_token: process.env.TELEGRAM_BOT_TOKEN,
   telegram_chat_id: process.env.TELEGRAM_CHAT_ID,
-  discord_webhook_url: process.env.DISCORD_WEBHOOK_URL
+  discord_webhook_url: process.env.DISCORD_WEBHOOK_URL,
+  slipok_api_key: process.env.SLIPOK_API_KEY,
+  slipok_branch_id: process.env.SLIPOK_BRANCH_ID
 };
 
 export async function getSettings(keys: readonly SettingKey[] = SETTING_KEYS) {
@@ -59,6 +68,10 @@ export function getAdminReviewChannel(settings: SettingsMap) {
     return "telegram";
   }
   return "dashboard_only";
+}
+
+export function getSlipVerificationProvider(settings: SettingsMap) {
+  return settings.slip_verification_provider === "slipok" ? "slipok" : "manual";
 }
 
 export function getBooleanSetting(settings: SettingsMap, key: SettingKey, defaultValue = false) {
