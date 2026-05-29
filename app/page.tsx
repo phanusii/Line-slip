@@ -1385,12 +1385,6 @@ export default function Home() {
                 </div>
                 <div className="mobileActionGrid">
                   <button
-                    className={selectedEventId === event.id ? "btn selected" : "btn subtle"}
-                    onClick={() => selectEvent(event.id)}
-                  >
-                    เปิดงาน
-                  </button>
-                  <button
                     className="btn subtle"
                     onClick={() =>
                       authenticatedDownload(`/api/admin/events/${event.id}/export.csv`)
