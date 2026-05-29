@@ -121,7 +121,13 @@ alter table public.payment_targets
   on delete set null;
 
 create index events_slug_idx on public.events(slug);
+create index events_open_created_idx on public.events(created_at desc)
+  where is_open = true and archived_at is null;
 create index payment_targets_event_status_idx on public.payment_targets(event_id, status);
+create index payment_targets_event_visible_sort_idx on public.payment_targets(event_id, sort_order, created_at)
+  where status <> 'deleted';
+create index payment_targets_selected_line_user_updated_idx on public.payment_targets(selected_line_user_id, updated_at desc)
+  where selected_line_user_id is not null and status <> 'deleted';
 create index slip_submissions_event_status_idx on public.slip_submissions(event_id, status);
 create index slip_submissions_storage_path_idx on public.slip_submissions(storage_path) where storage_path is not null;
 create index slip_submissions_image_hash_idx on public.slip_submissions(image_hash) where image_hash is not null and metadata_deleted_at is null;

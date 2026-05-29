@@ -1,7 +1,7 @@
 import QRCode from "qrcode";
 import { NextRequest, NextResponse } from "next/server";
 import { formatApiError } from "@/lib/api-error";
-import { getBearerToken, verifyAndGetProfile } from "@/lib/liff";
+import { getBearerToken, verifyAndGetProfile, verifyLineAccessToken } from "@/lib/liff";
 import { buildPromptPayPayload } from "@/lib/promptpay";
 import { getSettings } from "@/lib/settings";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -171,8 +171,26 @@ async function handleBootstrap(request: NextRequest, input: { accessToken?: stri
   }
 
   const page = normalizePage(input.page);
-  const profile = await verifyAndGetProfile(accessToken);
   const supabase = createServiceClient();
+
+  if (page === "pay") {
+    const [, settings, events] = await Promise.all([
+      verifyLineAccessToken(accessToken),
+      getSettings(["contact_url"]),
+      getOpenEventsWithFirstTargets(supabase)
+    ]);
+
+    return NextResponse.json({
+      page,
+      contactUrl: settings.contact_url ?? "",
+      selection: null,
+      events,
+      payments: [],
+      notice: null
+    });
+  }
+
+  const profile = await verifyAndGetProfile(accessToken);
 
   const [{ data: lineUser, error: lineUserError }, settings] = await Promise.all([
     supabase

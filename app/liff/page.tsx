@@ -376,6 +376,9 @@ export default function LiffPaymentPage() {
         const token = window.liff.getAccessToken();
         if (!token) throw new Error("ไม่พบ LINE access token กรุณาเปิดผ่าน LINE อีกครั้ง");
         setAccessToken(token);
+        void window.liff.getProfile().then(setProfile).catch(() => {
+          // Profile badge is optional; payment data loads from the server.
+        });
 
         // Phase 1 done — show UI shell immediately
         setBooting(false);
