@@ -753,7 +753,11 @@ export default function Home() {
         const a = document.createElement("a");
         a.href = objectUrl;
         const disposition = response.headers.get("content-disposition") ?? "";
-        a.download = disposition.match(/filename="([^"]+)"/)?.[1] ?? "ดาวน์โหลด";
+        const utf8Name = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+        const asciiName = disposition.match(/filename="([^"]+)"/i)?.[1];
+        a.download = utf8Name
+          ? decodeURIComponent(utf8Name)
+          : asciiName ?? "download";
         a.click();
         URL.revokeObjectURL(objectUrl);
       })

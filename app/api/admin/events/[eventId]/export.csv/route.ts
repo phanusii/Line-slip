@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { formatApiError } from "@/lib/api-error";
 import { actorFromRequest, assertAdmin } from "@/lib/auth";
+import { attachmentDisposition } from "@/lib/format";
 import { statusLabels } from "@/lib/status";
 import { createServiceClient } from "@/lib/supabase/server";
 
@@ -55,7 +56,7 @@ export async function GET(
     return new NextResponse(`\uFEFF${csv}`, {
       headers: {
         "content-type": "text/csv; charset=utf-8",
-        "content-disposition": `attachment; filename="${event.data.slug}-payments.csv"`
+        "content-disposition": attachmentDisposition(`${event.data.slug}-payments.csv`, "payments.csv")
       }
     });
   } catch (error) {

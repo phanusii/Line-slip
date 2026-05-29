@@ -26,3 +26,18 @@ export function safeFilePart(input: string) {
     .replace(/^_+|_+$/g, "")
     .slice(0, 80);
 }
+
+export function asciiFilePart(input: string, fallback = "download") {
+  const safe = input
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7E]+/g, "")
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+  return safe || fallback;
+}
+
+export function attachmentDisposition(filename: string, fallback = "download") {
+  const asciiName = asciiFilePart(filename, fallback);
+  return `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}

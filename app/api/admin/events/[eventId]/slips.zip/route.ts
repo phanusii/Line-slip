@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PassThrough, Readable } from "node:stream";
 import { formatApiError } from "@/lib/api-error";
 import { actorFromRequest, assertAdmin } from "@/lib/auth";
-import { safeFilePart } from "@/lib/format";
+import { attachmentDisposition, safeFilePart } from "@/lib/format";
 import { createServiceClient } from "@/lib/supabase/server";
 
 export async function GET(
@@ -78,7 +78,7 @@ export async function GET(
     return new NextResponse(Readable.toWeb(stream) as ReadableStream, {
       headers: {
         "content-type": "application/zip",
-        "content-disposition": `attachment; filename="${event.data.slug}-slips.zip"`
+        "content-disposition": attachmentDisposition(`${event.data.slug}-slips.zip`, "slips.zip")
       }
     });
   } catch (error) {
