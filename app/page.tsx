@@ -1012,6 +1012,39 @@ export default function Home() {
     };
   }, [detail?.targets]);
 
+  function renderEventPicker(label: string) {
+    if (!events.length) return null;
+    return (
+      <div className="eventPicker">
+        <label className="field">
+          <span>{label}</span>
+          <select
+            value={selectedEventId ?? selectedEvent?.id ?? ""}
+            disabled={busy || events.length <= 1}
+            onChange={(event) => {
+              if (event.target.value && event.target.value !== selectedEventId) {
+                void selectEvent(event.target.value);
+              }
+            }}
+          >
+            {events.map((event) => (
+              <option key={event.id} value={event.id}>
+                {event.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {selectedEvent ? (
+          <div className="eventPickerStats" aria-label="สรุปงานที่เลือก">
+            <span>{selectedEvent.target_count.toLocaleString("th-TH")} รายชื่อ</span>
+            <span>จ่ายแล้ว {selectedEvent.paid_count.toLocaleString("th-TH")}</span>
+            <span>ค้างจ่าย {selectedEvent.unpaid_count.toLocaleString("th-TH")}</span>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className={adminUser ? "page adminAppPage" : "page"}>
       <header className="hero">
@@ -1409,6 +1442,7 @@ export default function Home() {
                   </span>
                 </div>
               </div>
+              {renderEventPicker("เลือกงานเรียกเก็บเงินที่จะแสดงรายชื่อ")}
               <div className="segmented">
                 {(
                   [
@@ -1574,6 +1608,7 @@ export default function Home() {
                   <span className="desktopOnly">รายชื่อค้างจ่าย</span>
                 </button>
               </div>
+              {renderEventPicker("เลือกงานเรียกเก็บเงินที่จะแสดงสลิป")}
               <details className="manageSection">
                 <summary>⚙ จัดการงาน</summary>
                 <div className="manageActions">

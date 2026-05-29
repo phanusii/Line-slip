@@ -714,6 +714,46 @@ tbody tr:hover {
   resize: vertical;
 }
 
+.eventPicker {
+  align-items: end;
+  background: rgba(248, 250, 255, 0.88);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  margin: 4px 0 14px;
+  padding: 12px;
+}
+
+.eventPicker .field {
+  gap: 6px;
+}
+
+.eventPicker select {
+  font-weight: 850;
+  min-height: 46px;
+}
+
+.eventPickerStats {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.eventPickerStats span {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
 .formGrid {
   display: grid;
   gap: 14px;
@@ -1773,6 +1813,21 @@ tbody tr:hover {
   .alertPanel {
     border-radius: 18px;
     padding: 18px;
+  }
+
+  .eventPicker {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    margin: 2px 0 12px;
+    padding: 10px;
+  }
+
+  .eventPicker select {
+    min-height: 44px;
+  }
+
+  .eventPickerStats {
+    justify-content: flex-start;
   }
 
   .alertPanel {
