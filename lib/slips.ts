@@ -6,10 +6,12 @@ import { STORAGE_BUCKET } from "@/lib/env";
 import { applySlipStatus } from "@/lib/slip-status";
 import { getBooleanSetting, getSettings, getSlipVerificationProvider } from "@/lib/settings";
 import {
+  acquireSlipOkQuotaLease,
   disableSlipOkToManual,
   getSlipOkQuota,
   isSlipOkQuotaExhausted,
   recordSlipOkUsage,
+  releaseSlipOkQuotaLease,
   type SlipOkQuotaSnapshot,
   verifySlipWithSlipOk
 } from "@/lib/slipok";
@@ -313,15 +315,17 @@ export async function uploadSlipImage(input: UploadSlipInput) {
   }
 
   if (input.paymentTargetId) {
-    await supabase
+    const targetUpdated = await supabase
       .from("payment_targets")
       .update({
         status: "manual_review",
+        amount_locked_at: new Date().toISOString(),
         paid_at: null,
         paid_slip_submission_id: null
       })
       .eq("id", input.paymentTargetId)
       .neq("status", "verified");
+    if (targetUpdated.error) throw targetUpdated.error;
   }
 
   if (providerCheck.verificationProvider === "slipok" && providerCheck.usageStatus) {
@@ -401,90 +405,114 @@ async function runProviderCheck(input: {
 
   if (provider !== "slipok") return manualCheck;
 
-  const quotaBefore = await getSlipOkQuota(settings).catch((error) => ({
-    ok: false,
-    quota: null,
-    overQuota: null,
-    used: null,
-    remaining: null,
-    raw: null,
-    error: error instanceof Error ? error.message : String(error)
-  }) satisfies SlipOkQuotaSnapshot);
+  const leaseToken = await acquireSlipOkQuotaLease().catch((error) => {
+    console.error("slipok quota lease failed", error);
+    return null;
+  });
 
-  if (!quotaBefore.ok) {
+  if (!leaseToken) {
     return {
       ...manualCheck,
       verificationProvider: "slipok",
-      checkStatus: "quota_check_failed",
-      reasons: ["slipok_quota_check_failed"],
-      response: { quotaBefore },
-      usageStatus: "quota_check_failed"
+      checkStatus: "slipok_busy",
+      reasons: ["slipok_busy"],
+      response: { error: "SlipOK verification queue is busy or unavailable" },
+      usageStatus: "slipok_busy"
     };
   }
 
-  if (isSlipOkQuotaExhausted(quotaBefore)) {
+  try {
+    const quotaBefore = await getSlipOkQuota(settings).catch((error) => ({
+      ok: false,
+      quota: null,
+      overQuota: null,
+      used: null,
+      remaining: null,
+      endDate: null,
+      raw: null,
+      error: error instanceof Error ? error.message : String(error)
+    }) satisfies SlipOkQuotaSnapshot);
+
+    if (!quotaBefore.ok) {
+      return {
+        ...manualCheck,
+        verificationProvider: "slipok",
+        checkStatus: "quota_check_failed",
+        reasons: ["slipok_quota_check_failed"],
+        response: { quotaBefore },
+        usageStatus: "quota_check_failed"
+      };
+    }
+
+    if (isSlipOkQuotaExhausted(quotaBefore)) {
+      return {
+        ...manualCheck,
+        verificationProvider: "slipok",
+        checkStatus: "skipped_quota_exhausted",
+        reasons: ["slipok_quota_exhausted"],
+        response: { quotaBefore },
+        quotaBefore,
+        usageStatus: "skipped_quota_exhausted",
+        disableReason: "SlipOK เหลือ 1 ครั้งหรือน้อยกว่า ระบบจึงปิดกลับเป็น Manual เพื่อไม่ให้เกิดค่าใช้จ่าย"
+      };
+    }
+
+    const checkedAt = new Date().toISOString();
+    const verification = await verifySlipWithSlipOk({
+      settings,
+      imageBuffer: input.imageBuffer,
+      amountExpected: input.amountExpected
+    }).catch((error) => ({
+      ok: false,
+      passed: false,
+      checkStatus: "api_error",
+      reasons: ["slipok_api_error"],
+      amountDetected: null,
+      reference: null,
+      raw: null,
+      error: error instanceof Error ? error.message : String(error)
+    }));
+
+    const quotaAfter = await getSlipOkQuota(settings).catch((error) => ({
+      ok: false,
+      quota: null,
+      overQuota: null,
+      used: null,
+      remaining: null,
+      endDate: null,
+      raw: null,
+      error: error instanceof Error ? error.message : String(error)
+    }) satisfies SlipOkQuotaSnapshot);
+    const shouldAutoApprove =
+      verification.passed &&
+      getBooleanSetting(settings, "slipok_auto_approve_enabled", true);
+
     return {
-      ...manualCheck,
       verificationProvider: "slipok",
-      checkStatus: "skipped_quota_exhausted",
-      reasons: ["slipok_quota_exhausted"],
-      response: { quotaBefore },
+      checkStatus: verification.passed ? "passed" : verification.checkStatus,
+      reasons: verification.reasons.length ? verification.reasons : ["slipok_manual_review"],
+      amountDetected: verification.amountDetected,
+      response: {
+        slipok: verification.raw,
+        error: verification.error ?? null,
+        quotaBefore,
+        quotaAfter
+      },
+      reference: verification.reference ?? input.fallbackReference,
+      checkedAt,
+      shouldAutoApprove,
       quotaBefore,
-      usageStatus: "skipped_quota_exhausted",
-      disableReason: "SlipOK quota หมดหรือเกินโควต้า ระบบจึงปิดกลับเป็น Manual"
+      quotaAfter,
+      usageStatus: verification.passed ? "passed" : verification.checkStatus,
+      disableReason: isSlipOkQuotaExhausted(quotaAfter)
+        ? "SlipOK เหลือ 1 ครั้งหรือน้อยกว่าหลังตรวจสลิป ระบบจึงปิดกลับเป็น Manual เพื่อไม่ให้เกิดค่าใช้จ่าย"
+        : null
     };
+  } finally {
+    await releaseSlipOkQuotaLease(leaseToken).catch((error) => {
+      console.error("slipok quota lease release failed", error);
+    });
   }
-
-  const checkedAt = new Date().toISOString();
-  const verification = await verifySlipWithSlipOk({
-    settings,
-    imageBuffer: input.imageBuffer,
-    amountExpected: input.amountExpected
-  }).catch((error) => ({
-    ok: false,
-    passed: false,
-    checkStatus: "api_error",
-    reasons: ["slipok_api_error"],
-    amountDetected: null,
-    reference: null,
-    raw: null,
-    error: error instanceof Error ? error.message : String(error)
-  }));
-
-  const quotaAfter = await getSlipOkQuota(settings).catch((error) => ({
-    ok: false,
-    quota: null,
-    overQuota: null,
-    used: null,
-    remaining: null,
-    raw: null,
-    error: error instanceof Error ? error.message : String(error)
-  }) satisfies SlipOkQuotaSnapshot);
-  const shouldAutoApprove =
-    verification.passed &&
-    getBooleanSetting(settings, "slipok_auto_approve_enabled", true);
-
-  return {
-    verificationProvider: "slipok",
-    checkStatus: verification.passed ? "passed" : verification.checkStatus,
-    reasons: verification.reasons.length ? verification.reasons : ["slipok_manual_review"],
-    amountDetected: verification.amountDetected,
-    response: {
-      slipok: verification.raw,
-      error: verification.error ?? null,
-      quotaBefore,
-      quotaAfter
-    },
-    reference: verification.reference ?? input.fallbackReference,
-    checkedAt,
-    shouldAutoApprove,
-    quotaBefore,
-    quotaAfter,
-    usageStatus: verification.passed ? "passed" : verification.checkStatus,
-    disableReason: isSlipOkQuotaExhausted(quotaAfter)
-      ? "SlipOK quota หมดหรือเกินโควต้าหลังตรวจสลิป ระบบจึงปิดกลับเป็น Manual"
-      : null
-  };
 }
 
 async function queuedOrManualProviderCheck(fallbackReference: string | null): Promise<ProviderCheck> {

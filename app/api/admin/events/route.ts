@@ -11,12 +11,13 @@ type PaymentTargetInput = {
 
 type NormalizedTarget = {
   display_name: string;
-  amount_due: number;
+  amount_due: number | null;
   note: string;
   amount_from_default: boolean;
 };
 
 const promptpayTypes = new Set(["phone", "national_id", "ewallet"]);
+const amountModes = new Set(["fixed", "payer_entered"]);
 
 function validatePromptPayId(value: string | null, type: string) {
   if (!value) return null;
@@ -51,12 +52,21 @@ function parseAmount(value: unknown) {
   return Number(value.replace(/,/g, "").trim());
 }
 
-function parseTargetsText(text: string, defaultAmount: number) {
+function parseTargetsText(text: string, defaultAmount: number, amountMode: string) {
   return text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
+      if (amountMode === "payer_entered") {
+        return {
+          display_name: line,
+          amount_due: null,
+          note: "",
+          amount_from_default: false
+        };
+      }
+
       const cells = line.includes("\t")
         ? line.split("\t")
         : line.includes(",")
@@ -89,7 +99,7 @@ function parseTargetsText(text: string, defaultAmount: number) {
     });
 }
 
-function normalizeTargets(payload: unknown, defaultAmount: number) {
+function normalizeTargets(payload: unknown, defaultAmount: number, amountMode: string) {
   if (!Array.isArray(payload)) return [];
 
   return payload.map((target) => {
@@ -97,9 +107,14 @@ function normalizeTargets(payload: unknown, defaultAmount: number) {
     const amount = parseAmount(input.amount_due);
     return {
       display_name: String(input.display_name ?? "").trim(),
-      amount_due: Number.isFinite(amount) ? amount : defaultAmount,
+      amount_due:
+        amountMode === "payer_entered"
+          ? null
+          : Number.isFinite(amount)
+            ? amount
+            : defaultAmount,
       note: input.note ? String(input.note).trim() : "",
-      amount_from_default: !Number.isFinite(amount)
+      amount_from_default: amountMode === "fixed" && !Number.isFinite(amount)
     };
   });
 }
@@ -112,7 +127,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("events")
       .select(
-        "id,name,slug,is_open,expected_total,created_at,payment_targets(id,status,amount_due),slip_submissions(id,status,file_size,storage_path,file_deleted_at,metadata_deleted_at)"
+        "id,name,slug,amount_mode,is_open,expected_total,created_at,payment_targets(id,status,amount_due),slip_submissions(id,status,file_size,storage_path,file_deleted_at,metadata_deleted_at)"
       )
       .is("archived_at", null)
       .order("created_at", { ascending: false });
@@ -134,6 +149,7 @@ export async function GET(request: NextRequest) {
           id: event.id,
           name: event.name,
           slug: event.slug,
+          amount_mode: event.amount_mode,
           is_open: event.is_open,
           expected_total: event.expected_total,
           target_count: targets.length,
@@ -162,10 +178,13 @@ export async function POST(request: NextRequest) {
     const promptpayType = promptpayTypes.has(String(body.promptpay_type))
       ? String(body.promptpay_type)
       : "phone";
+    const amountMode = amountModes.has(String(body.amount_mode))
+      ? String(body.amount_mode)
+      : "fixed";
     const defaultAmount = parseAmount(body.default_amount);
     const targetsText = String(body.targets_text ?? "").trim();
-    const fromStructuredTargets = normalizeTargets(body.targets, defaultAmount);
-    const fromText = targetsText ? parseTargetsText(targetsText, defaultAmount) : [];
+    const fromStructuredTargets = normalizeTargets(body.targets, defaultAmount, amountMode);
+    const fromText = targetsText ? parseTargetsText(targetsText, defaultAmount, amountMode) : [];
     const rawTargets = fromStructuredTargets.length ? fromStructuredTargets : fromText;
 
     if (!name) {
@@ -187,8 +206,8 @@ export async function POST(request: NextRequest) {
     const invalidTarget = rawTargets.find(
       (target) =>
         !target.display_name ||
-        !Number.isFinite(target.amount_due) ||
-        target.amount_due <= 0
+        (amountMode === "fixed" &&
+          (!Number.isFinite(target.amount_due) || Number(target.amount_due) <= 0))
     );
 
     if (invalidTarget) {
@@ -210,7 +229,7 @@ export async function POST(request: NextRequest) {
     }
 
     const expectedTotal = rawTargets.reduce(
-      (sum, target) => sum + Number(target.amount_due),
+      (sum, target) => sum + Number(target.amount_due ?? 0),
       0
     );
     const slugBase = body.slug ? slugify(String(body.slug)) : slugify(name);
@@ -221,6 +240,7 @@ export async function POST(request: NextRequest) {
       .insert({
         name,
         slug,
+        amount_mode: amountMode,
         promptpay_id: promptpayId,
         promptpay_type: promptpayType,
         expected_total: expectedTotal,
@@ -236,6 +256,8 @@ export async function POST(request: NextRequest) {
         event_id: event.id,
         display_name: target.display_name,
         amount_due: target.amount_due,
+        amount_entered_at: null,
+        amount_locked_at: null,
         note: target.note || null,
         status: "unpaid",
         sort_order: index + 1
@@ -256,6 +278,7 @@ export async function POST(request: NextRequest) {
       after_data: {
         name,
         slug,
+        amount_mode: amountMode,
         promptpay_id: promptpayId,
         promptpay_type: promptpayType,
         expected_total: expectedTotal,

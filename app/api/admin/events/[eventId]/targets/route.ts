@@ -37,24 +37,24 @@ export async function POST(
     const body = await request.json();
 
     const displayName = String(body.display_name ?? "").trim();
-    const amountDue = parseAmount(body.amount_due);
+    const parsedAmount = parseAmount(body.amount_due);
     const note = body.note ? String(body.note).trim() : null;
 
     if (!displayName) {
       return NextResponse.json({ error: "กรุณากรอกชื่อ" }, { status: 400 });
     }
-    if (!Number.isFinite(amountDue) || amountDue <= 0) {
-      return NextResponse.json({ error: "ยอดเงินต้องมากกว่า 0" }, { status: 400 });
-    }
-
     const { data: event, error: eventError } = await supabase
       .from("events")
-      .select("id,name,archived_at")
+      .select("id,name,amount_mode,archived_at")
       .eq("id", eventId)
       .maybeSingle();
     if (eventError) throw eventError;
     if (!event || event.archived_at) {
       return NextResponse.json({ error: "ไม่พบงานนี้ หรืออาจถูกลบ/ปิดไปแล้ว" }, { status: 404 });
+    }
+    const amountDue = event.amount_mode === "payer_entered" ? null : parsedAmount;
+    if (event.amount_mode === "fixed" && (!Number.isFinite(amountDue) || Number(amountDue) <= 0)) {
+      return NextResponse.json({ error: "ยอดเงินต้องมากกว่า 0" }, { status: 400 });
     }
 
     const { data: duplicate, error: duplicateError } = await supabase
@@ -84,6 +84,8 @@ export async function POST(
         event_id: eventId,
         display_name: displayName,
         amount_due: amountDue,
+        amount_entered_at: null,
+        amount_locked_at: null,
         note,
         status: "unpaid",
         sort_order: nextSortOrder

@@ -64,14 +64,35 @@ export async function PATCH(
 
     const body = await request.json();
     const displayName = String(body.display_name ?? "").trim();
-    const amountDue = parseAmount(body.amount_due);
+    const parsedAmount = parseAmount(body.amount_due);
     const note = body.note ? String(body.note).trim() : null;
 
     if (!displayName) {
       return NextResponse.json({ error: "กรุณากรอกชื่อ" }, { status: 400 });
     }
-    if (!Number.isFinite(amountDue) || amountDue <= 0) {
+    const { data: event, error: eventError } = await supabase
+      .from("events")
+      .select("amount_mode")
+      .eq("id", target.event_id)
+      .single();
+    if (eventError) throw eventError;
+
+    const amountDue =
+      event.amount_mode === "payer_entered" && !Number.isFinite(parsedAmount)
+        ? null
+        : parsedAmount;
+    if (event.amount_mode === "fixed" && (!Number.isFinite(amountDue) || Number(amountDue) <= 0)) {
       return NextResponse.json({ error: "ยอดเงินต้องมากกว่า 0" }, { status: 400 });
+    }
+    if (
+      event.amount_mode === "payer_entered" &&
+      target.amount_locked_at &&
+      Number(amountDue ?? 0) !== Number(target.amount_due ?? 0)
+    ) {
+      return NextResponse.json(
+        { error: "ยอดเงินถูกล็อกหลังรับสลิปแล้ว แก้ไขได้เฉพาะชื่อและหมายเหตุ" },
+        { status: 400 }
+      );
     }
 
     const { data: duplicate, error: duplicateError } = await supabase
@@ -92,6 +113,10 @@ export async function PATCH(
       .update({
         display_name: displayName,
         amount_due: amountDue,
+        amount_entered_at:
+          event.amount_mode === "payer_entered" && amountDue !== null
+            ? target.amount_entered_at ?? new Date().toISOString()
+            : target.amount_entered_at,
         note
       })
       .eq("id", target.id)

@@ -25,9 +25,10 @@ export async function GET(request: NextRequest) {
     const usedThisMonth = await getSlipOkUsedThisMonth(monthKey).catch(() => 0);
 
     if (getSlipVerificationProvider(settings) === "slipok" && isSlipOkQuotaExhausted(quota)) {
-      await disableSlipOkToManual("SlipOK quota หมดหรือเกินโควต้าจากการเช็กในหน้า Settings");
+      const reason = "SlipOK เหลือ 1 ครั้งหรือน้อยกว่า ระบบจึงปิดเป็น Manual เพื่อป้องกันค่าใช้จ่าย";
+      await disableSlipOkToManual(reason);
       settings.slip_verification_provider = "manual";
-      settings.slipok_disabled_reason = "SlipOK quota หมดหรือเกินโควต้าจากการเช็กในหน้า Settings";
+      settings.slipok_disabled_reason = reason;
       settings.slipok_disabled_at = new Date().toISOString();
     }
 

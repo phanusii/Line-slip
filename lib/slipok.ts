@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { getBooleanSetting, getSettings, SettingsMap } from "@/lib/settings";
 import { createServiceClient } from "@/lib/supabase/server";
 
@@ -10,6 +11,7 @@ export type SlipOkQuotaSnapshot = {
   overQuota: number | null;
   used: number | null;
   remaining: number | null;
+  endDate: string | null;
   raw: unknown;
   error?: string;
 };
@@ -122,6 +124,7 @@ export async function getSlipOkQuota(settings?: SettingsMap) {
       overQuota: null,
       used: null,
       remaining: null,
+      endDate: null,
       raw: null,
       error: "ยังไม่ได้ตั้งค่า SlipOK API Key หรือ Branch ID"
     } satisfies SlipOkQuotaSnapshot;
@@ -137,6 +140,7 @@ export async function getSlipOkQuota(settings?: SettingsMap) {
   const overQuota = getNestedNumber(raw, ["overQuota", "over_quota", "over_quota_count"]) ?? 0;
   const used = getNestedNumber(raw, ["used", "usedQuota", "usage", "count"]);
   const remaining = getNestedNumber(raw, ["remaining", "quota", "remainingQuota"]) ?? quota;
+  const endDate = getNestedString(raw, ["endDate", "end_date", "expiresAt", "expires_at"]);
 
   if (!response.ok || (!slipOkSuccess(raw) && quota === null && remaining === null)) {
     return {
@@ -145,6 +149,7 @@ export async function getSlipOkQuota(settings?: SettingsMap) {
       overQuota,
       used,
       remaining,
+      endDate,
       raw,
       error: slipOkMessage(raw) ?? `SlipOK quota API error: ${response.status}`
     } satisfies SlipOkQuotaSnapshot;
@@ -156,13 +161,64 @@ export async function getSlipOkQuota(settings?: SettingsMap) {
     overQuota,
     used,
     remaining,
+    endDate,
     raw
   } satisfies SlipOkQuotaSnapshot;
 }
 
 export function isSlipOkQuotaExhausted(quota: SlipOkQuotaSnapshot | null | undefined) {
   if (!quota?.ok) return false;
-  return Number(quota.remaining ?? quota.quota ?? 1) <= 0 || Number(quota.overQuota ?? 0) > 0;
+  return Number(quota.remaining ?? quota.quota ?? 1) <= 1 || Number(quota.overQuota ?? 0) > 0;
+}
+
+const slipOkLeaseId = "slipok";
+const slipOkLeaseTtlMs = 90_000;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function acquireSlipOkQuotaLease(maxWaitMs = 10_000) {
+  const supabase = createServiceClient();
+  const token = crypto.randomUUID();
+  const deadline = Date.now() + maxWaitMs;
+
+  do {
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + slipOkLeaseTtlMs).toISOString();
+    const acquired = await supabase
+      .from("slipok_quota_guard")
+      .update({
+        lease_token: token,
+        lease_expires_at: expiresAt,
+        updated_at: now.toISOString()
+      })
+      .eq("id", slipOkLeaseId)
+      .or(`lease_expires_at.is.null,lease_expires_at.lt.${now.toISOString()}`)
+      .select("lease_token")
+      .maybeSingle();
+
+    if (acquired.error) throw acquired.error;
+    if (acquired.data?.lease_token === token) return token;
+    if (Date.now() >= deadline) return null;
+    await sleep(400);
+  } while (Date.now() <= deadline);
+
+  return null;
+}
+
+export async function releaseSlipOkQuotaLease(token: string) {
+  const supabase = createServiceClient();
+  const released = await supabase
+    .from("slipok_quota_guard")
+    .update({
+      lease_token: null,
+      lease_expires_at: null,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", slipOkLeaseId)
+    .eq("lease_token", token);
+  if (released.error) throw released.error;
 }
 
 export async function verifySlipWithSlipOk(input: {
@@ -202,8 +258,8 @@ export async function verifySlipWithSlipOk(input: {
   const amountDetected = getNestedNumber(raw, ["amount", "transAmount", "trans_amount", "transferAmount"]);
   const amountExpected = input.amountExpected ?? null;
   const amountMatches =
-    amountExpected === null ||
-    amountDetected === null ||
+    amountExpected !== null &&
+    amountDetected !== null &&
     Math.round(Number(amountDetected) * 100) === Math.round(Number(amountExpected) * 100);
   const apiPassed = response.ok && slipOkSuccess(raw);
   const passed = apiPassed && amountMatches;
@@ -211,6 +267,7 @@ export async function verifySlipWithSlipOk(input: {
 
   if (!response.ok) reasons.push("slipok_api_error");
   if (response.ok && !apiPassed) reasons.push("slipok_rejected");
+  if (apiPassed && amountDetected === null) reasons.push("slipok_amount_missing");
   if (apiPassed && !amountMatches) reasons.push("slipok_amount_mismatch");
   if (passed) reasons.push("slipok_verified");
 

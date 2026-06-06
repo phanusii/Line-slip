@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
 
     const { data: target, error: targetError } = await supabase
       .from("payment_targets")
-      .select("id,event_id,display_name,amount_due,status,events(id,name,slug,promptpay_id,promptpay_type,is_open,archived_at)")
+      .select("id,event_id,display_name,amount_due,status,events(id,name,slug,amount_mode,promptpay_id,promptpay_type,is_open,archived_at)")
       .eq("selected_line_user_id", lineUser.id)
       .neq("status", "deleted")
       .order("updated_at", { ascending: false })
@@ -42,6 +42,9 @@ export async function POST(request: NextRequest) {
     }
 
     const amount = Number(target.amount_due);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return NextResponse.json({ selection: null });
+    }
     const payload = buildPromptPayPayload(event.promptpay_id, amount, event.promptpay_type);
     const qrDataUrl = await QRCode.toDataURL(payload, {
       margin: 1,
@@ -51,7 +54,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       selection: {
-        event: { id: event.id, name: event.name },
+        event: { id: event.id, name: event.name, amount_mode: event.amount_mode },
         target: {
           id: target.id,
           display_name: target.display_name,

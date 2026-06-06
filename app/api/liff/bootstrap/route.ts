@@ -20,7 +20,8 @@ function eventFromRelation<T>(relation: T | T[] | null | undefined): T | null {
 function mapTarget(target: {
   id: string;
   display_name: string;
-  amount_due: number | string;
+  amount_due: number | string | null;
+  amount_locked_at?: string | null;
   status: string;
   selected_line_user_id?: string | null;
   sort_order?: number | null;
@@ -29,7 +30,8 @@ function mapTarget(target: {
     id: target.id,
     order: target.sort_order ?? order,
     display_name: target.display_name,
-    amount_due: Number(target.amount_due),
+    amount_due: target.amount_due === null ? null : Number(target.amount_due),
+    amount_locked: Boolean(target.amount_locked_at),
     status: target.status,
     is_selected: Boolean(target.selected_line_user_id)
   };
@@ -41,7 +43,7 @@ async function getActiveSelection(
 ) {
   const { data: target, error } = await supabase
     .from("payment_targets")
-    .select("id,event_id,display_name,amount_due,status,events(id,name,slug,promptpay_id,promptpay_type,is_open,archived_at)")
+    .select("id,event_id,display_name,amount_due,amount_locked_at,status,events(id,name,slug,amount_mode,promptpay_id,promptpay_type,is_open,archived_at)")
     .eq("selected_line_user_id", lineUserId)
     .neq("status", "deleted")
     .order("updated_at", { ascending: false })
@@ -55,6 +57,7 @@ async function getActiveSelection(
   if (!event?.promptpay_id || !event.is_open || event.archived_at) return null;
 
   const amount = Number(target.amount_due);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
   const payload = buildPromptPayPayload(event.promptpay_id, amount, event.promptpay_type);
   const qrDataUrl = await QRCode.toDataURL(payload, {
     margin: 1,
@@ -63,7 +66,7 @@ async function getActiveSelection(
   });
 
   return {
-    event: { id: event.id, name: event.name },
+    event: { id: event.id, name: event.name, amount_mode: event.amount_mode },
     target: {
       id: target.id,
       display_name: target.display_name,
@@ -77,7 +80,7 @@ async function getActiveSelection(
 async function getOpenEventsWithFirstTargets(supabase: ReturnType<typeof createServiceClient>) {
   const { data: events, error } = await supabase
     .from("events")
-    .select("id,name,slug,promptpay_id,promptpay_type,is_open,archived_at")
+    .select("id,name,slug,amount_mode,promptpay_id,promptpay_type,is_open,archived_at")
     .eq("is_open", true)
     .is("archived_at", null)
     .order("created_at", { ascending: false });
@@ -88,7 +91,7 @@ async function getOpenEventsWithFirstTargets(supabase: ReturnType<typeof createS
   const { data: targets, error: targetsError } = firstEventId
     ? await supabase
         .from("payment_targets")
-        .select("id,display_name,amount_due,status,selected_line_user_id,sort_order,created_at")
+        .select("id,display_name,amount_due,amount_locked_at,status,selected_line_user_id,sort_order,created_at")
         .eq("event_id", firstEventId)
         .neq("status", "deleted")
         .order("sort_order", { ascending: true })
@@ -102,6 +105,7 @@ async function getOpenEventsWithFirstTargets(supabase: ReturnType<typeof createS
     id: event.id,
     name: event.name,
     slug: event.slug,
+    amount_mode: event.amount_mode,
     has_promptpay: Boolean(event.promptpay_id),
     targets:
       event.id === firstEventId

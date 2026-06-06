@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     if (light) {
       const { data, error } = await supabase
         .from("events")
-        .select("id,name,slug,promptpay_id,promptpay_type,is_open,archived_at")
+        .select("id,name,slug,amount_mode,promptpay_id,promptpay_type,is_open,archived_at")
         .eq("is_open", true)
         .is("archived_at", null)
         .order("created_at", { ascending: false });
@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
           id: event.id,
           name: event.name,
           slug: event.slug,
+          amount_mode: event.amount_mode,
           has_promptpay: Boolean(event.promptpay_id),
           targets: []
         }))
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("events")
       .select(
-        "id,name,slug,promptpay_id,promptpay_type,is_open,archived_at,payment_targets(id,display_name,amount_due,status,selected_line_user_id,sort_order,created_at)"
+        "id,name,slug,amount_mode,promptpay_id,promptpay_type,is_open,archived_at,payment_targets(id,display_name,amount_due,amount_locked_at,status,selected_line_user_id,sort_order,created_at)"
       )
       .eq("is_open", true)
       .is("archived_at", null)
@@ -60,12 +61,14 @@ export async function GET(request: NextRequest) {
           id: event.id,
           name: event.name,
           slug: event.slug,
+          amount_mode: event.amount_mode,
           has_promptpay: Boolean(event.promptpay_id),
           targets: sorted.map((target, idx) => ({
             id: target.id,
             order: target.sort_order ?? idx + 1,
             display_name: target.display_name,
-            amount_due: Number(target.amount_due),
+            amount_due: target.amount_due === null ? null : Number(target.amount_due),
+            amount_locked: Boolean(target.amount_locked_at),
             status: target.status,
             is_selected: Boolean(target.selected_line_user_id)
           }))

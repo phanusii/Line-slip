@@ -36,19 +36,21 @@ type EventRow = {
   id: string;
   name: string;
   slug: string;
+  amount_mode: "fixed" | "payer_entered";
   has_promptpay: boolean;
   targets: Array<{
     id: string;
     order: number;
     display_name: string;
-    amount_due: number;
+    amount_due: number | null;
+    amount_locked: boolean;
     status: string;
     is_selected: boolean;
   }>;
 };
 
 type SelectionResult = {
-  event: { id: string; name: string };
+  event: { id: string; name: string; amount_mode: "fixed" | "payer_entered" };
   target: { id: string; display_name: string; amount_due: number; status?: string };
   qr: { data_url: string; payload: string };
 };
@@ -91,14 +93,14 @@ type BootstrapResponse = {
   notice?: string | null;
 };
 
-const eventsCacheKey = "line-slip:liff-events:v1";
+const eventsCacheKey = "line-slip:liff-events:v2";
 
 function bootstrapCacheKey(mode: LiffMode) {
-  return `line-slip:liff-bootstrap:${mode}:v3`;
+  return `line-slip:liff-bootstrap:${mode}:v4`;
 }
 
 function targetsCacheKey(eventId: string) {
-  return `line-slip:liff-targets:${eventId}:v1`;
+  return `line-slip:liff-targets:${eventId}:v2`;
 }
 
 const statusText: Record<string, string> = {
@@ -325,6 +327,7 @@ export default function LiffPaymentPage() {
   const [events, setEvents] = useState<EventRow[]>([]);
   const [selectedEventId, setSelectedEventId] = useState("");
   const [selectedTargetId, setSelectedTargetId] = useState("");
+  const [payerAmount, setPayerAmount] = useState("");
   const [search, setSearch] = useState("");
   const [profile, setProfile] = useState<LiffProfile | null>(null);
   const [accessToken, setAccessToken] = useState("");
@@ -433,9 +436,11 @@ export default function LiffPaymentPage() {
     if (data.page === "slip" && data.selection) {
       setResult(data.selection);
       setSelectedTargetId(data.selection.target.id);
+      setPayerAmount(String(data.selection.target.amount_due));
     } else if (data.page === "pay" || data.page === "me") {
       setResult(null);
       setSelectedTargetId("");
+      setPayerAmount("");
     }
     if (data.payments) {
       setMyPayments(data.payments);
@@ -504,6 +509,14 @@ export default function LiffPaymentPage() {
 
   async function selectTarget(targetId = selectedTargetId) {
     if (!selectedEvent || !targetId || !accessToken) return;
+    const amount = Number(payerAmount);
+    if (
+      selectedEvent.amount_mode === "payer_entered" &&
+      (!Number.isInteger(amount) || amount < 1 || amount > 9_999_999)
+    ) {
+      setError("กรุณาระบุยอดเต็มบาทตั้งแต่ 1 ถึง 9,999,999 บาท");
+      return;
+    }
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -513,7 +526,8 @@ export default function LiffPaymentPage() {
         body: JSON.stringify({
           accessToken,
           eventId: selectedEvent.id,
-          targetId
+          targetId,
+          amount: selectedEvent.amount_mode === "payer_entered" ? amount : undefined
         })
       });
       setSelectedTargetId(targetId);
@@ -678,6 +692,7 @@ export default function LiffPaymentPage() {
                     setSelectedTargetId("");
                     setResult(null);
                     setSearch("");
+                    setPayerAmount("");
                     void loadTargets(event.target.value);
                   }}
                 >
@@ -726,7 +741,13 @@ export default function LiffPaymentPage() {
                             disabled={busy || !selectedEvent.has_promptpay || isPaid}
                             onClick={() => {
                               if (isPaid) return;
-                              setSelectedTargetId((prev) => prev === target.id ? "" : target.id);
+                              setSelectedTargetId((previous) => {
+                                const next = previous === target.id ? "" : target.id;
+                                setPayerAmount(
+                                  next && target.amount_due !== null ? String(target.amount_due) : ""
+                                );
+                                return next;
+                              });
                             }}
                           >
                             <span>
@@ -738,7 +759,11 @@ export default function LiffPaymentPage() {
                               </strong>
                               <small>{isPaid ? "จ่ายแล้ว" : target.is_selected ? "เคยเลือกไว้แล้ว" : statusText[target.status] ?? target.status}</small>
                             </span>
-                            <b>{formatMoney(target.amount_due)}</b>
+                            <b>
+                              {target.amount_due === null
+                                ? "ระบุยอดเอง"
+                                : `${formatMoney(target.amount_due)} บาท`}
+                            </b>
                           </button>
                         );
                       })
@@ -755,11 +780,40 @@ export default function LiffPaymentPage() {
                       <div className="confirmPanel">
                         <p>
                           <strong>{t.display_name}</strong>
-                          <span> · {formatMoney(t.amount_due)} บาท</span>
+                          {selectedEvent.amount_mode === "fixed" ? (
+                            <span> · {formatMoney(t.amount_due)} บาท</span>
+                          ) : null}
                         </p>
+                        {selectedEvent.amount_mode === "payer_entered" ? (
+                          <label className="field">
+                            <span>ระบุยอดที่ต้องการชำระ (เต็มบาท)</span>
+                            <input
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              value={payerAmount}
+                              disabled={t.amount_locked}
+                              onChange={(event) =>
+                                setPayerAmount(event.target.value.replace(/\D/g, "").slice(0, 7))
+                              }
+                              placeholder="เช่น 250"
+                            />
+                            <small className="hint">
+                              {t.amount_locked
+                                ? "ยอดนี้ถูกล็อกแล้วหลังระบบรับสลิป"
+                                : "แก้ยอดและสร้าง QR ใหม่ได้จนกว่าจะส่งสลิปสำเร็จ"}
+                            </small>
+                          </label>
+                        ) : null}
                         <button
                           className="btn primary liffPrimary"
-                          disabled={busy || !selectedEvent.has_promptpay}
+                          disabled={
+                            busy ||
+                            !selectedEvent.has_promptpay ||
+                            (selectedEvent.amount_mode === "payer_entered" &&
+                              (!Number.isInteger(Number(payerAmount)) ||
+                                Number(payerAmount) < 1 ||
+                                Number(payerAmount) > 9_999_999))
+                          }
                           onClick={() => void selectTarget(selectedTargetId)}
                         >
                           {busy ? "กำลังสร้าง QR..." : "ยืนยัน — สร้าง QR Code"}
@@ -785,6 +839,7 @@ export default function LiffPaymentPage() {
               onChangeName={() => {
                 setResult(null);
                 setSelectedTargetId("");
+                setPayerAmount("");
                 setSlipFile(null);
                 setSlipPreviewUrl(null);
                 setUploadState({ phase: "idle" });

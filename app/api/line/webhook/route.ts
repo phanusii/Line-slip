@@ -252,12 +252,22 @@ export async function POST(request: NextRequest) {
       const eventRow = Array.isArray(activeSelection.data.events)
         ? activeSelection.data.events[0]
         : activeSelection.data.events;
+      const amountExpected = Number(activeSelection.data.amount_due);
+      if (!Number.isFinite(amountExpected) || amountExpected <= 0) {
+        if (event.replyToken) {
+          await replyLine(
+            event.replyToken,
+            lineMenuMessages("กรุณากดสร้าง QR และระบุยอดเงินก่อนส่งสลิป")
+          );
+        }
+        continue;
+      }
       const slip = await uploadSlipImage({
         eventId: activeSelection.data.event_id,
         eventSlug: eventRow?.slug ?? activeSelection.data.event_id,
         paymentTargetId: activeSelection.data.id,
         personName: activeSelection.data.display_name,
-        amountExpected: Number(activeSelection.data.amount_due),
+        amountExpected,
         sourceBuffer: content.buffer,
         mimeType: content.mimeType,
         lineMessageId: event.message.id,

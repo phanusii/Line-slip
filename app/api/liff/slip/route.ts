@@ -85,13 +85,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "งานนี้ปิดรับสลิปแล้ว" }, { status: 400 });
     }
 
+    const amountExpected = Number(target.amount_due);
+    if (!Number.isFinite(amountExpected) || amountExpected <= 0) {
+      return NextResponse.json(
+        { error: "กรุณาระบุยอดเงินและสร้าง QR Code ก่อนส่งสลิป" },
+        { status: 409 }
+      );
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
     const slip = await uploadSlipImage({
       eventId: target.event_id,
       eventSlug: event.slug ?? target.event_id,
       paymentTargetId: target.id,
       personName: target.display_name,
-      amountExpected: Number(target.amount_due),
+      amountExpected,
       sourceBuffer: buffer,
       mimeType: file.type,
       lineUserDbId: lineUser.id,

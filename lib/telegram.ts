@@ -941,85 +941,6 @@ async function sendTargetsListByEvent(
     return;
   }
 
-  if (filter === "paid") {
-    const { data: paidTargets, error: paidError, count } = await supabase
-      .from("payment_targets")
-      .select("display_name,amount_due", { count: "exact" })
-      .eq("event_id", eventId)
-      .eq("status", "verified")
-      .order("sort_order", { ascending: true })
-      .order("created_at", { ascending: true });
-    if (paidError) throw paidError;
-
-    const totalPaid = count ?? paidTargets?.length ?? 0;
-    if (!paidTargets?.length) {
-      await callTelegram(settings, "sendMessage", {
-        chat_id: chatId,
-        text: [`${event.name}`, "จ่ายแล้ว 0 คน", "ยังไม่มีรายชื่อที่ชำระแล้ว"].join("\n"),
-        reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: "ดูทั้งหมด",
-                callback_data: signEventMenuCallback({ eventId, action: "targets", filter: "all", settings })
-              },
-              {
-                text: "ค้างจ่าย",
-                callback_data: signEventMenuCallback({ eventId, action: "targets", filter: "unpaid", settings })
-              }
-            ],
-            [
-              {
-                text: "เปิดในเว็บ",
-                url: appBaseUrl()
-              }
-            ]
-          ]
-        }
-      });
-      return;
-    }
-
-    const lines = [
-      `${event.name}`,
-      `จ่ายแล้ว ${totalPaid.toLocaleString("th-TH")} คน`,
-      "",
-      ...paidTargets.map((target, index) =>
-        `${index + 1}. ${target.display_name} ${Number(target.amount_due ?? 0).toLocaleString("th-TH")} บาท`
-      )
-    ];
-    const chunks = splitTelegramText(lines);
-    for (let index = 0; index < chunks.length; index += 1) {
-      await callTelegram(settings, "sendMessage", {
-        chat_id: chatId,
-        text: chunks[index],
-        reply_markup: index === chunks.length - 1
-          ? {
-              inline_keyboard: [
-                [
-                  {
-                    text: "ดูทั้งหมด",
-                    callback_data: signEventMenuCallback({ eventId, action: "targets", filter: "all", settings })
-                  },
-                  {
-                    text: "ค้างจ่าย",
-                    callback_data: signEventMenuCallback({ eventId, action: "targets", filter: "unpaid", settings })
-                  }
-                ],
-                [
-                  {
-                    text: "เปิดในเว็บ",
-                    url: appBaseUrl()
-                  }
-                ]
-              ]
-            }
-          : undefined
-      });
-    }
-    return;
-  }
-
   const from = page * targetPageSize;
   const to = from + targetPageSize - 1;
   let targetsQuery = supabase
@@ -1027,6 +948,10 @@ async function sendTargetsListByEvent(
     .select("display_name,amount_due,status", { count: "exact" })
     .eq("event_id", eventId)
     .neq("status", "deleted");
+
+  if (filter === "paid") {
+    targetsQuery = targetsQuery.eq("status", "verified");
+  }
 
   const { data: targets, error, count } = await targetsQuery
     .order("sort_order", { ascending: true })
@@ -1037,7 +962,8 @@ async function sendTargetsListByEvent(
   const lines = (targets ?? []).map((target, index) => {
     const order = from + index + 1;
     const amount = Number(target.amount_due ?? 0).toLocaleString("th-TH");
-    return `${order}. ${target.display_name} - ${amount} บาท - ${target.status}`;
+    const status = filter === "paid" ? "" : ` - ${target.status}`;
+    return `${order}. ${target.display_name} - ${amount} บาท${status}`;
   });
 
   const pageButtons = [];

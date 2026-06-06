@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     const supabase = createServiceClient();
     const { data, error } = await supabase
       .from("payment_targets")
-      .select("id,display_name,amount_due,status,selected_line_user_id,sort_order,created_at")
+      .select("id,display_name,amount_due,amount_locked_at,status,selected_line_user_id,sort_order,created_at")
       .eq("event_id", eventId)
       .neq("status", "deleted")
       .order("sort_order", { ascending: true })
@@ -33,7 +33,8 @@ export async function GET(request: NextRequest) {
         id: target.id,
         order: target.sort_order ?? idx + 1,
         display_name: target.display_name,
-        amount_due: Number(target.amount_due),
+        amount_due: target.amount_due === null ? null : Number(target.amount_due),
+        amount_locked: Boolean(target.amount_locked_at),
         status: target.status,
         is_selected: Boolean(target.selected_line_user_id)
       }))

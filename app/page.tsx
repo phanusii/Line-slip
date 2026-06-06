@@ -42,6 +42,7 @@ type EventSummary = {
   id: string;
   name: string;
   slug: string;
+  amount_mode: "fixed" | "payer_entered";
   is_open: boolean;
   expected_total: number;
   target_count: number;
@@ -77,6 +78,7 @@ type SlipOkQuota = {
     overQuota: number | null;
     used: number | null;
     remaining: number | null;
+    endDate: string | null;
     error?: string;
   };
   usedThisMonth: number;
@@ -103,11 +105,21 @@ type TelegramConnect = {
 };
 
 type EventDetail = {
-  event: { id: string; name: string; slug: string; expected_total: number; promptpay_id?: string | null; promptpay_type?: string | null };
+  event: {
+    id: string;
+    name: string;
+    slug: string;
+    amount_mode: "fixed" | "payer_entered";
+    expected_total: number;
+    promptpay_id?: string | null;
+    promptpay_type?: string | null;
+  };
   targets: Array<{
     id: string;
     display_name: string;
-    amount_due: number;
+    amount_due: number | null;
+    amount_entered_at: string | null;
+    amount_locked_at: string | null;
     note: string | null;
     status: string;
     sort_order: number;
@@ -198,7 +210,9 @@ const autoReasonLabels: Record<string, string> = {
   slipok_quota_exhausted: "โควต้า SlipOK หมด",
   slipok_api_error: "SlipOK API ไม่สำเร็จ",
   slipok_rejected: "SlipOK ไม่ผ่าน",
-  slipok_amount_mismatch: "ยอดไม่ตรงกับ SlipOK"
+  slipok_amount_missing: "SlipOK ไม่พบยอดเงิน",
+  slipok_amount_mismatch: "ยอดไม่ตรงกับ SlipOK",
+  slipok_busy: "คิวตรวจ SlipOK กำลังทำงาน ส่งให้แอดมินตรวจแทน"
 };
 
 function percent(used: number, limit: number) {
@@ -227,6 +241,10 @@ function settingEnabled(value: string | undefined, defaultValue = false) {
 function autoReasonText(reasons: string[] | null | undefined) {
   if (!reasons?.length) return "-";
   return reasons.map((reason) => autoReasonLabels[reason] ?? reason).join(", ");
+}
+
+function targetAmountText(amount: number | null | undefined) {
+  return amount === null || amount === undefined ? "ผู้ใช้ระบุยอดเอง" : `${formatMoney(amount)} บาท`;
 }
 
 function canReviewSlip(slip: SlipRow) {
@@ -291,7 +309,7 @@ export default function Home() {
   const [manualSlipModal, setManualSlipModal] = useState<{
     id: string;
     display_name: string;
-    amount_due: number;
+    amount_due: number | null;
   } | null>(null);
   const [targetEditor, setTargetEditor] = useState<{
     mode: "create" | "edit";
@@ -311,6 +329,7 @@ export default function Home() {
   const [newEventName, setNewEventName] = useState("");
   const [newPromptpayId, setNewPromptpayId] = useState("");
   const [newPromptpayType, setNewPromptpayType] = useState("phone");
+  const [newAmountMode, setNewAmountMode] = useState<"fixed" | "payer_entered">("fixed");
   const [newDefaultAmount, setNewDefaultAmount] = useState("");
   const [newTargetsText, setNewTargetsText] = useState(uniqueTargetsText);
   const [contactUrl, setContactUrl] = useState("");
@@ -379,6 +398,21 @@ export default function Home() {
     const text = newTargetsText.trim();
     const defaultAmt = Number(newDefaultAmount.replace(/,/g, "").trim());
     if (!text) return [];
+    if (newAmountMode === "payer_entered") {
+      return text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((display_name) => ({
+          display_name,
+          amount_due: null,
+          from_default: false
+        }))
+        .filter((target) => {
+          const name = target.display_name.toLowerCase();
+          return target.display_name && name !== "ชื่อ" && name !== "name" && name !== "รายชื่อ";
+        });
+    }
     return text
       .split(/\r?\n/)
       .map((line) => line.trim())
@@ -410,7 +444,7 @@ export default function Home() {
         const n = t.display_name.toLowerCase();
         return t.display_name && n !== "ชื่อ" && n !== "name" && n !== "รายชื่อ";
       });
-  }, [newTargetsText, newDefaultAmount]);
+  }, [newTargetsText, newDefaultAmount, newAmountMode]);
 
   async function checkSession() {
     setAuthChecking(true);
@@ -908,6 +942,7 @@ export default function Home() {
             name: newEventName,
             promptpay_id: newPromptpayId,
             promptpay_type: newPromptpayType,
+            amount_mode: newAmountMode,
             default_amount: newDefaultAmount,
             targets_text: newTargetsText
           })
@@ -917,6 +952,7 @@ export default function Home() {
       setNewEventName("");
       setNewPromptpayId("");
       setNewPromptpayType("phone");
+      setNewAmountMode("fixed");
       setNewDefaultAmount("");
       setNewTargetsText(uniqueTargetsText);
       setSelectedEventId(data.event.id);
@@ -1478,7 +1514,7 @@ export default function Home() {
                       <tr key={target.id}>
                         <td style={{ color: "var(--muted)", fontSize: 12, width: 32 }}>{target.sort_order || idx + 1}</td>
                         <td>{target.display_name}</td>
-                        <td>{formatMoney(target.amount_due)}</td>
+                        <td>{targetAmountText(target.amount_due)}</td>
                         <td>
                           <span className={target.status === "verified" ? "badge ok" : "badge warn"}>
                             {statusLabels[target.status] ?? target.status}
@@ -1529,7 +1565,7 @@ export default function Home() {
                           <span style={{ color: "var(--muted)", fontWeight: 500, fontSize: 12, marginRight: 4 }}>{target.sort_order || idx + 1}.</span>
                           {target.display_name}
                         </h3>
-                        <p>{formatMoney(target.amount_due)} บาท</p>
+                        <p>{targetAmountText(target.amount_due)}</p>
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
                         <span className={target.status === "verified" ? "badge ok" : "badge warn"}>
@@ -1571,7 +1607,7 @@ export default function Home() {
                   onClick={() => {
                     const text = detail.targets
                       .filter((target) => target.status !== "verified")
-                      .map((target) => `${target.display_name} ${formatMoney(target.amount_due)} บาท`)
+                      .map((target) => `${target.display_name} ${targetAmountText(target.amount_due)}`)
                       .join("\n");
                     navigator.clipboard.writeText(text);
                   }}
@@ -1856,6 +1892,12 @@ export default function Home() {
                   {slipokQuota.quota?.remaining ?? slipokQuota.quota?.quota ?? "ไม่ทราบ"}
                   {slipokQuota.quota?.overQuota ? ` · overQuota ${slipokQuota.quota.overQuota}` : ""}
                 </p>
+                {slipokQuota.quota?.endDate ? (
+                  <p>
+                    รอบปัจจุบันสิ้นสุด:{" "}
+                    {new Date(`${slipokQuota.quota.endDate}T00:00:00+07:00`).toLocaleDateString("th-TH")}
+                  </p>
+                ) : null}
                 {slipokQuota.disabledReason ? <p>เหตุผลที่ปิดล่าสุด: {slipokQuota.disabledReason}</p> : null}
                 {slipokQuota.quota?.error || slipokQuota.error ? (
                   <p style={{ color: "var(--danger)" }}>{slipokQuota.quota?.error ?? slipokQuota.error}</p>
@@ -1865,7 +1907,8 @@ export default function Home() {
               <p>กด “เช็กโควต้า SlipOK” เพื่อดึงโควต้าล่าสุด</p>
             )}
             <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
-              ถ้าโควต้าหมด ระบบจะบันทึกสลิปเป็นรอตรวจและส่งเข้า Telegram/Dashboard ตามปกติ
+              เพื่อป้องกันค่าใช้จ่าย ระบบจะปิด SlipOK เมื่อเหลือ 1 ครั้ง แล้วส่งสลิปเข้า
+              Telegram/Dashboard ให้แอดมินตรวจแทน
             </p>
           </div>
 
@@ -2247,6 +2290,29 @@ export default function Home() {
                   รองรับ PromptPay แบบเบอร์มือถือและเลขบัตรประชาชน ระบบจะสร้าง QR ด้วย tag ที่ตรงประเภท
                 </small>
               </label>
+            </div>
+
+            <label className="field">
+              <span>รูปแบบยอดเงิน</span>
+              <select
+                value={newAmountMode}
+                onChange={(event) => {
+                  const mode = event.target.value === "payer_entered" ? "payer_entered" : "fixed";
+                  setNewAmountMode(mode);
+                  if (mode === "payer_entered") setNewDefaultAmount("");
+                }}
+              >
+                <option value="fixed">แอดมินกำหนดยอด</option>
+                <option value="payer_entered">ให้ผู้ใช้ระบุยอดเอง</option>
+              </select>
+              <small className="hint">
+                {newAmountMode === "payer_entered"
+                  ? "ผู้ใช้กรอกยอดเต็มบาทหลังเลือกชื่อ และเปลี่ยนได้จนกว่าระบบจะรับสลิป"
+                  : "กำหนดยอดในรายชื่อแต่ละบรรทัด หรือใช้ยอดกลางเดียวกันทุกคน"}
+              </small>
+            </label>
+
+            {newAmountMode === "fixed" ? (
               <label className="field">
                 <span>ยอดกลาง กรณีทุกคนจ่ายเท่ากัน</span>
                 <input
@@ -2256,10 +2322,10 @@ export default function Home() {
                   placeholder="เช่น 500"
                 />
               </label>
-            </div>
+            ) : null}
 
             <label className="field">
-              <span>รายชื่อและยอดเงิน</span>
+              <span>{newAmountMode === "payer_entered" ? "รายชื่อ" : "รายชื่อและยอดเงิน"}</span>
               <textarea
                 rows={6}
                 value={newTargetsText}
@@ -2272,15 +2338,26 @@ export default function Home() {
               const duplicates = parsedNewTargets
                 .map((t) => t.display_name)
                 .filter((name, i, arr) => arr.indexOf(name) !== i);
-              const missingAmount = parsedNewTargets.filter((t) => t.amount_due <= 0);
-              const total = parsedNewTargets.reduce((sum, t) => sum + t.amount_due, 0);
+              const missingAmount =
+                newAmountMode === "fixed"
+                  ? parsedNewTargets.filter((target) => Number(target.amount_due ?? 0) <= 0)
+                  : [];
+              const total = parsedNewTargets.reduce(
+                (sum, target) => sum + Number(target.amount_due ?? 0),
+                0
+              );
               const hasError = duplicates.length > 0 || missingAmount.length > 0;
               return (
                 <div className="targetPreviewPanel">
                   <div className="targetPreviewHeader">
                     <span>
                       <strong>ตัวอย่างรายชื่อ</strong>
-                      <span className="muted"> · {parsedNewTargets.length} คน · รวม {total.toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })} บาท</span>
+                      <span className="muted">
+                        {" "}· {parsedNewTargets.length} คน ·{" "}
+                        {newAmountMode === "payer_entered"
+                          ? "ผู้ใช้ระบุยอดเอง"
+                          : `รวม ${total.toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })} บาท`}
+                      </span>
                     </span>
                     {hasError && <span className="badge danger">มีข้อผิดพลาด</span>}
                   </div>
@@ -2292,11 +2369,20 @@ export default function Home() {
                   )}
                   <div className="targetPreviewList">
                     {parsedNewTargets.slice(0, 50).map((t, i) => (
-                      <div key={i} className={`targetPreviewRow${t.amount_due <= 0 ? " hasError" : ""}`}>
+                      <div
+                        key={i}
+                        className={`targetPreviewRow${
+                          newAmountMode === "fixed" && Number(t.amount_due ?? 0) <= 0 ? " hasError" : ""
+                        }`}
+                      >
                         <span className="targetPreviewOrder">{i + 1}</span>
                         <span className="targetPreviewName">{t.display_name}</span>
                         <span className={`targetPreviewAmount${t.from_default ? " fromDefault" : ""}`}>
-                          {t.amount_due > 0 ? `${t.amount_due.toLocaleString("th-TH")} บ.` : "—"}
+                          {newAmountMode === "payer_entered"
+                            ? "ระบุภายหลัง"
+                            : Number(t.amount_due ?? 0) > 0
+                              ? `${Number(t.amount_due).toLocaleString("th-TH")} บ.`
+                              : "—"}
                         </span>
                       </div>
                     ))}
@@ -2311,7 +2397,9 @@ export default function Home() {
             <div className="hintBox">
               <strong>รูปแบบที่รองรับ</strong>
               <p>
-                วางเฉพาะชื่อทีละบรรทัดแล้วกรอกยอดกลาง หรือ สมชาย 500 / สมชาย[TAB]500
+                {newAmountMode === "payer_entered"
+                  ? "วางเฉพาะชื่อทีละบรรทัด ผู้ใช้จะเป็นคนระบุยอดเมื่อสร้าง QR"
+                  : "วางเฉพาะชื่อทีละบรรทัดแล้วกรอกยอดกลาง หรือ สมชาย 500 / สมชาย[TAB]500"}
               </p>
             </div>
 
@@ -2355,13 +2443,22 @@ export default function Home() {
               />
             </label>
             <label className="field">
-              <span>ยอดเงิน</span>
+              <span>
+                ยอดเงิน{" "}
+                {detail?.event.amount_mode === "payer_entered" ? (
+                  <span className="muted">(เว้นว่างเพื่อให้ผู้ใช้ระบุ)</span>
+                ) : null}
+              </span>
               <input
                 inputMode="decimal"
                 value={targetFormAmount}
                 onChange={(event) => setTargetFormAmount(event.target.value)}
                 placeholder="เช่น 100"
+                disabled={Boolean(targetEditor.target?.amount_locked_at)}
               />
+              {targetEditor.target?.amount_locked_at ? (
+                <small className="hint">ยอดถูกล็อกแล้วหลังระบบรับสลิป จึงแก้ไขไม่ได้</small>
+              ) : null}
             </label>
             <label className="field">
               <span>หมายเหตุ <span className="muted">(ไม่บังคับ)</span></span>
@@ -2383,7 +2480,11 @@ export default function Home() {
               </button>
               <button
                 className="btn primary"
-                disabled={!targetFormName.trim() || !targetFormAmount.trim() || busy}
+                disabled={
+                  !targetFormName.trim() ||
+                  (detail?.event.amount_mode !== "payer_entered" && !targetFormAmount.trim()) ||
+                  busy
+                }
                 onClick={saveTarget}
               >
                 {busy ? "กำลังบันทึก..." : "บันทึก"}
@@ -2403,7 +2504,7 @@ export default function Home() {
             <div className="alertPanel">
               <p>
                 ต้องการลบ <strong>{targetDelete.display_name}</strong> ยอด{" "}
-                <strong>{formatMoney(targetDelete.amount_due)} บาท</strong> ออกจากงานนี้ใช่ไหม
+                <strong>{targetAmountText(targetDelete.amount_due)}</strong> ออกจากงานนี้ใช่ไหม
               </p>
               <p className="muted">
                 ถ้ารายชื่อนี้จ่ายแล้ว ระบบจะไม่อนุญาตให้ลบ เพื่อรักษาประวัติการจ่ายและสลิป
@@ -2478,7 +2579,7 @@ export default function Home() {
             </div>
             <div className="hintBox">
               <p><strong>{manualSlipModal.display_name}</strong></p>
-              <p>ยอด: <strong style={{ color: "var(--brand)" }}>{formatMoney(manualSlipModal.amount_due)} บาท</strong></p>
+              <p>ยอด: <strong style={{ color: "var(--brand)" }}>{targetAmountText(manualSlipModal.amount_due)}</strong></p>
             </div>
             <label className="field">
               <span>รูปสลิป <span className="muted">(ไม่บังคับ)</span></span>

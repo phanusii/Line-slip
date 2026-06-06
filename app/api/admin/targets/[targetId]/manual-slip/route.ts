@@ -28,6 +28,13 @@ export async function POST(
         { status: 409 }
       );
     }
+    const amountExpected = Number(target.amount_due);
+    if (!Number.isFinite(amountExpected) || amountExpected <= 0) {
+      return NextResponse.json(
+        { error: "กรุณาระบุยอดเงินของรายชื่อนี้ก่อนยืนยันการชำระเงิน" },
+        { status: 400 }
+      );
+    }
 
     const contentType = request.headers.get("content-type") ?? "";
     let file: FormDataEntryValue | null = null;
@@ -67,7 +74,7 @@ export async function POST(
         event_id: target.event_id,
         payment_target_id: targetId,
         status: "manual_review",
-        amount_expected: target.amount_due,
+        amount_expected: amountExpected,
         storage_path: storagePath,
         storage_bucket: STORAGE_BUCKET,
         file_size: fileSize ?? 0,

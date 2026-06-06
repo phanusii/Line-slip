@@ -17,6 +17,7 @@ create table public.events (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   slug text not null unique,
+  amount_mode text not null default 'fixed' check (amount_mode in ('fixed', 'payer_entered')),
   promptpay_id text,
   promptpay_type text not null default 'phone' check (promptpay_type in ('phone', 'national_id', 'ewallet')),
   expected_total numeric(12, 2) not null default 0,
@@ -30,7 +31,9 @@ create table public.payment_targets (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references public.events(id) on delete cascade,
   display_name text not null,
-  amount_due numeric(12, 2) not null,
+  amount_due numeric(12, 2) check (amount_due is null or amount_due > 0),
+  amount_entered_at timestamptz,
+  amount_locked_at timestamptz,
   note text,
   status public.payment_status not null default 'unpaid',
   sort_order integer not null default 0,
@@ -153,6 +156,17 @@ create table public.slipok_usage_logs (
 
 create index slipok_usage_logs_month_idx on public.slipok_usage_logs(month_key, created_at desc);
 create index slipok_usage_logs_slip_idx on public.slipok_usage_logs(slip_id) where slip_id is not null;
+
+create table public.slipok_quota_guard (
+  id text primary key check (id = 'slipok'),
+  lease_token uuid,
+  lease_expires_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+
+insert into public.slipok_quota_guard (id)
+values ('slipok')
+on conflict (id) do nothing;
 create index audit_logs_event_created_idx on public.audit_logs(event_id, created_at desc);
 
 create or replace function public.touch_updated_at()
@@ -189,6 +203,7 @@ alter table public.payment_targets enable row level security;
 alter table public.line_users enable row level security;
 alter table public.slip_submissions enable row level security;
 alter table public.slipok_usage_logs enable row level security;
+alter table public.slipok_quota_guard enable row level security;
 alter table public.admin_users enable row level security;
 alter table public.audit_logs enable row level security;
 
@@ -214,6 +229,11 @@ with check (auth.role() = 'service_role');
 
 create policy "service_role_slipok_usage_logs_all"
 on public.slipok_usage_logs for all
+using (auth.role() = 'service_role')
+with check (auth.role() = 'service_role');
+
+create policy "service_role_slipok_quota_guard_all"
+on public.slipok_quota_guard for all
 using (auth.role() = 'service_role')
 with check (auth.role() = 'service_role');
 
