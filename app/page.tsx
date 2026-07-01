@@ -633,6 +633,28 @@ export default function Home() {
     }
   }
 
+  async function copyToClipboard(text: string, successMessage = "คัดลอกแล้ว") {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // fallback สำหรับ in-app browser (เช่นใน LINE) หรือบริบทที่ไม่มี Clipboard API
+        const el = document.createElement("textarea");
+        el.value = text;
+        el.style.position = "fixed";
+        el.style.opacity = "0";
+        document.body.appendChild(el);
+        el.focus();
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+      }
+      setToast(successMessage);
+    } catch {
+      setToast("คัดลอกไม่สำเร็จ กรุณาคัดลอกด้วยตนเอง");
+    }
+  }
+
   async function enableBrowserNotifications() {
     if (!("Notification" in window)) {
       setToast("Browser นี้ไม่รองรับ Notification");
@@ -1627,7 +1649,7 @@ export default function Home() {
                       .filter((target) => target.status !== "verified")
                       .map((target) => `${target.display_name} ${targetAmountText(target.amount_due)}`)
                       .join("\n");
-                    navigator.clipboard.writeText(text);
+                    void copyToClipboard(text, "คัดลอกรายชื่อยังไม่จ่ายแล้ว");
                   }}
                 >
                   คัดลอกรายชื่อยังไม่จ่าย
@@ -2118,7 +2140,7 @@ export default function Home() {
               <code className="codeBox">{lineChatShareUrl}</code>
               <button
                 className="btn subtle"
-                onClick={() => navigator.clipboard.writeText(lineChatShareUrl)}
+                onClick={() => void copyToClipboard(lineChatShareUrl, "คัดลอกลิงก์แล้ว")}
               >
                 คัดลอกลิงก์ส่งให้ผู้ปกครอง
               </button>
@@ -2128,7 +2150,7 @@ export default function Home() {
               <code className="codeBox">{webhookUrl}</code>
               <button
                 className="btn subtle"
-                onClick={() => navigator.clipboard.writeText(webhookUrl)}
+                onClick={() => void copyToClipboard(webhookUrl, "คัดลอก Webhook URL แล้ว")}
               >
                 คัดลอก Webhook URL
               </button>
@@ -2153,7 +2175,7 @@ export default function Home() {
               <code className="codeBox">{liffUrl}</code>
               <button
                 className="btn subtle"
-                onClick={() => navigator.clipboard.writeText(liffUrl)}
+                onClick={() => void copyToClipboard(liffUrl, "คัดลอก LIFF URL แล้ว")}
               >
                 คัดลอก LIFF URL
               </button>
