@@ -216,6 +216,7 @@ const autoReasonLabels: Record<string, string> = {
 };
 
 function percent(used: number, limit: number) {
+  if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return 0;
   return Math.min(100, Math.round((used / limit) * 100));
 }
 
@@ -731,11 +732,22 @@ export default function Home() {
     setBusy(true);
     setError(null);
     try {
-      const [usageData, eventsData] = await Promise.all([
+      const [usageResult, eventsResult] = await Promise.allSettled([
         api<Usage>("/api/admin/usage"),
         api<{ events: EventSummary[] }>("/api/admin/events")
       ]);
-      setUsage(usageData);
+
+      if (usageResult.status === "fulfilled") {
+        setUsage(usageResult.value);
+      } else {
+        setUsage(null);
+      }
+
+      if (eventsResult.status === "rejected") {
+        throw eventsResult.reason;
+      }
+
+      const eventsData = eventsResult.value;
       setEvents(eventsData.events);
       const selectedStillExists = Boolean(
         selectedEventId && eventsData.events.some((event) => event.id === selectedEventId)
