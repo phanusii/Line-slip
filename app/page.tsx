@@ -267,11 +267,16 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers.set("content-type", "application/json");
   }
 
-  const response = await fetch(path, {
-    ...init,
-    credentials: "include",
-    headers
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      credentials: "include",
+      headers
+    });
+  } catch {
+    throw new Error("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณากดโหลดข้อมูลอีกครั้ง");
+  }
 
   if (!response.ok) {
     const text = await response.text();

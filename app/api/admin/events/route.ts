@@ -124,26 +124,86 @@ export async function GET(request: NextRequest) {
     assertAdmin(request, "viewer");
     const supabase = createServiceClient();
 
-    const { data, error } = await supabase
+    const { data: events, error } = await supabase
       .from("events")
-      .select(
-        "id,name,slug,amount_mode,is_open,expected_total,created_at,payment_targets(id,status,amount_due),slip_submissions(id,status,file_size,storage_path,file_deleted_at,metadata_deleted_at)"
-      )
+      .select("id,name,slug,amount_mode,is_open,expected_total,created_at")
       .is("archived_at", null)
       .order("created_at", { ascending: false });
 
     if (error) throw error;
 
+    const eventIds = (events ?? []).map((event) => event.id);
+    const [targetsResult, slipsResult] =
+      eventIds.length > 0
+        ? await Promise.allSettled([
+            supabase
+              .from("payment_targets")
+              .select("event_id,status,amount_due")
+              .in("event_id", eventIds)
+              .neq("status", "deleted"),
+            supabase
+              .from("slip_submissions")
+              .select("event_id,status,file_size,storage_path,file_deleted_at,metadata_deleted_at")
+              .in("event_id", eventIds)
+              .is("metadata_deleted_at", null)
+          ])
+        : [];
+
+    const targets =
+      targetsResult?.status === "fulfilled" && !targetsResult.value.error
+        ? targetsResult.value.data ?? []
+        : [];
+    const slips =
+      slipsResult?.status === "fulfilled" && !slipsResult.value.error
+        ? slipsResult.value.data ?? []
+        : [];
+    const targetStats = new Map<
+      string,
+      { target_count: number; paid_count: number; unpaid_count: number }
+    >();
+    const slipStats = new Map<
+      string,
+      { review_count: number; slip_count: number; storage_bytes: number }
+    >();
+
+    for (const target of targets) {
+      const current = targetStats.get(target.event_id) ?? {
+        target_count: 0,
+        paid_count: 0,
+        unpaid_count: 0
+      };
+      current.target_count += 1;
+      if (target.status === "verified") current.paid_count += 1;
+      else current.unpaid_count += 1;
+      targetStats.set(target.event_id, current);
+    }
+
+    for (const slip of slips) {
+      const current = slipStats.get(slip.event_id) ?? {
+        review_count: 0,
+        slip_count: 0,
+        storage_bytes: 0
+      };
+      current.slip_count += 1;
+      if (slip.status === "manual_review") current.review_count += 1;
+      if (slip.storage_path && !slip.file_deleted_at) {
+        current.storage_bytes += Number(slip.file_size ?? 0);
+      }
+      slipStats.set(slip.event_id, current);
+    }
+
     return NextResponse.json({
-      events: data.map((event) => {
-        const targets = event.payment_targets ?? [];
-        const slips = (event.slip_submissions ?? []).filter((slip) => !slip.metadata_deleted_at);
-        const paid = targets.filter((target) => target.status === "verified").length;
-        const unpaid = targets.filter((target) => target.status !== "verified").length;
-        const review = slips.filter((slip) => slip.status === "manual_review").length;
-        const storageBytes = slips
-          .filter((slip) => slip.storage_path && !slip.file_deleted_at)
-          .reduce((sum, slip) => sum + Number(slip.file_size ?? 0), 0);
+      events: (events ?? []).map((event) => {
+        const target = targetStats.get(event.id) ?? {
+          target_count: 0,
+          paid_count: 0,
+          unpaid_count: 0
+        };
+        const slip = slipStats.get(event.id) ?? {
+          review_count: 0,
+          slip_count: 0,
+          storage_bytes: 0
+        };
 
         return {
           id: event.id,
@@ -152,12 +212,12 @@ export async function GET(request: NextRequest) {
           amount_mode: event.amount_mode,
           is_open: event.is_open,
           expected_total: event.expected_total,
-          target_count: targets.length,
-          paid_count: paid,
-          unpaid_count: unpaid,
-          review_count: review,
-          slip_count: slips.length,
-          storage_bytes: storageBytes
+          target_count: target.target_count,
+          paid_count: target.paid_count,
+          unpaid_count: target.unpaid_count,
+          review_count: slip.review_count,
+          slip_count: slip.slip_count,
+          storage_bytes: slip.storage_bytes
         };
       })
     });

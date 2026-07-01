@@ -46,10 +46,10 @@ export async function GET(
       pathsByBucket.set(slip.storage_bucket, bucketPaths);
     }
 
-    await Promise.all(
+    await Promise.allSettled(
       Array.from(pathsByBucket.entries()).map(async ([bucket, paths]) => {
         const signed = await supabase.storage.from(bucket).createSignedUrls(paths, 10 * 60);
-        if (signed.error) throw signed.error;
+        if (signed.error) return;
         for (const item of signed.data ?? []) {
           if (item.path && item.signedUrl) signedUrls.set(`${bucket}/${item.path}`, item.signedUrl);
         }
