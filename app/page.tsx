@@ -287,6 +287,24 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+// Safari (โหมดส่วนตัว / บล็อกคุกกี้ข้ามเว็บ) โยน SecurityError เมื่อแตะ localStorage
+// จึงต้องหุ้ม try/catch เสมอ ไม่งั้นทั้งแอปจะ crash เป็น client-side exception
+function safeLocalGet(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeLocalSet(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // ไม่ต้องทำอะไร: ผู้ใช้บล็อก storage อยู่
+  }
+}
+
 export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -362,7 +380,7 @@ export default function Home() {
 
   useEffect(() => {
     setOrigin(window.location.origin);
-    setNotifyEnabled(localStorage.getItem("admin_notifications_enabled") === "1");
+    setNotifyEnabled(safeLocalGet("admin_notifications_enabled") === "1");
     void checkSession();
   }, []);
 
@@ -622,7 +640,7 @@ export default function Home() {
     }
     const permission = await Notification.requestPermission();
     if (permission === "granted") {
-      localStorage.setItem("admin_notifications_enabled", "1");
+      safeLocalSet("admin_notifications_enabled", "1");
       setNotifyEnabled(true);
       setToast("เปิดแจ้งเตือนบนเครื่องนี้แล้ว");
     } else {
