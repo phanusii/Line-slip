@@ -86,6 +86,26 @@ type LineQuota = {
   error?: string;
 };
 
+type HealthCheck = {
+  status: "ok" | "warning" | "error";
+  message: string;
+  detail?: string;
+  latencyMs?: number;
+};
+
+type AdminHealth = {
+  ok: boolean;
+  message: string;
+  checkedAt: string;
+  checks: {
+    env: HealthCheck;
+    supabaseDns: HealthCheck;
+    database: HealthCheck;
+    storage: HealthCheck;
+    schema: HealthCheck;
+  };
+};
+
 type SlipOkQuota = {
   provider: "manual" | "slipok";
   enabled: boolean;
@@ -394,6 +414,8 @@ export default function Home() {
   const [adminReviewTokenSecret, setAdminReviewTokenSecret] = useState("");
   const [adminReviewTokenTtlHours, setAdminReviewTokenTtlHours] = useState("24");
   const [lineQuota, setLineQuota] = useState<LineQuota | null>(null);
+  const [adminHealth, setAdminHealth] = useState<AdminHealth | null>(null);
+  const [healthChecking, setHealthChecking] = useState(false);
   const [pendingCount, setPendingCount] = useState<PendingCount | null>(null);
   const [lastPendingCount, setLastPendingCount] = useState<number | null>(null);
   const [notifyEnabled, setNotifyEnabled] = useState(false);
@@ -494,7 +516,7 @@ export default function Home() {
       if (!response.ok) return;
       const data = (await response.json()) as { user: AuthUser };
       setAdminUser(data.user);
-      await Promise.all([loadAll(true), loadSettings()]);
+      await Promise.allSettled([loadAll(true), loadSettings(), loadAdminHealth(true)]);
     } catch {
       setAdminUser(null);
     } finally {
@@ -516,7 +538,7 @@ export default function Home() {
       if (!response.ok) throw new Error(data.error ?? "เข้าสู่ระบบไม่สำเร็จ");
       setAdminUser(data.user ?? null);
       setPassword("");
-      await Promise.all([loadAll(true), loadSettings()]);
+      await Promise.allSettled([loadAll(true), loadSettings(), loadAdminHealth(true)]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -606,6 +628,33 @@ export default function Home() {
       setLineQuota(await api<LineQuota>("/api/admin/line/quota"));
     } catch {
       // non-critical
+    }
+  }
+
+  async function loadAdminHealth(silent = false) {
+    setHealthChecking(true);
+    try {
+      const response = await fetch("/api/admin/health", { credentials: "include" });
+      const data = (await response.json()) as AdminHealth;
+      setAdminHealth(data);
+      if (!silent && !data.ok) {
+        setToast("ตรวจพบปัญหาฐานข้อมูล ดูรายละเอียดในแถบสถานะระบบ");
+      }
+    } catch (err) {
+      setAdminHealth({
+        ok: false,
+        message: "ตรวจสุขภาพระบบไม่สำเร็จ",
+        checkedAt: new Date().toISOString(),
+        checks: {
+          env: { status: "warning", message: "ยังตรวจไม่ได้" },
+          supabaseDns: { status: "warning", message: "ยังตรวจไม่ได้" },
+          database: { status: "error", message: "เรียก health endpoint ไม่สำเร็จ", detail: err instanceof Error ? err.message : String(err) },
+          storage: { status: "warning", message: "ยังตรวจไม่ได้" },
+          schema: { status: "warning", message: "ยังตรวจไม่ได้" }
+        }
+      });
+    } finally {
+      setHealthChecking(false);
     }
   }
 
@@ -1226,6 +1275,10 @@ export default function Home() {
                   <RefreshCw size={16} />
                   {busy ? "กำลังโหลด" : "โหลดข้อมูล"}
                 </button>
+                <button className="btn subtle" disabled={healthChecking} onClick={() => loadAdminHealth()}>
+                  <AlertTriangle size={16} />
+                  {healthChecking ? "กำลังตรวจ" : "ตรวจฐานข้อมูล"}
+                </button>
                 <button className="btn subtle" disabled={busy} onClick={logoutAdmin}>
                   <LogOut size={16} />
                   ออกจากระบบ
@@ -1285,6 +1338,33 @@ export default function Home() {
             <button className="iconButton" onClick={() => setToast(null)} aria-label="ปิดแจ้งเตือน">
               ปิด
             </button>
+          </section>
+        ) : null}
+
+        {adminUser && adminHealth && !adminHealth.ok ? (
+          <section className="healthPanel">
+            <div className="healthPanelHeader">
+              <span className="badge danger">ฐานข้อมูลมีปัญหา</span>
+              <div>
+                <h2>{adminHealth.message}</h2>
+                <p className="muted">
+                  ตรวจล่าสุด {new Date(adminHealth.checkedAt).toLocaleString("th-TH")}
+                </p>
+              </div>
+              <button className="btn subtle" disabled={healthChecking} onClick={() => loadAdminHealth()}>
+                <RefreshCw size={15} />
+                {healthChecking ? "กำลังตรวจ" : "ตรวจซ้ำ"}
+              </button>
+            </div>
+            <div className="healthGrid">
+              {Object.entries(adminHealth.checks).map(([key, check]) => (
+                <div className={`healthCheck ${check.status}`} key={key}>
+                  <span>{key}</span>
+                  <strong>{check.message}</strong>
+                  {check.detail ? <small>{check.detail}</small> : null}
+                </div>
+              ))}
+            </div>
           </section>
         ) : null}
 

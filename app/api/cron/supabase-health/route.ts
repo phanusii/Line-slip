@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase/server";
+import { getAdminHealthReport } from "@/lib/admin-health";
 
 async function notifyTelegramFailure(message: string) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -30,16 +30,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const startedAt = Date.now();
   try {
-    const supabase = createServiceClient();
-    const { error } = await supabase.from("settings").select("key").limit(1);
-    if (error) throw error;
+    const report = await getAdminHealthReport();
+    if (!report.ok) {
+      throw new Error(report.message);
+    }
 
     return NextResponse.json({
       ok: true,
       service: "supabase",
-      latencyMs: Date.now() - startedAt,
+      checks: report.checks,
       checkedAt: new Date().toISOString()
     });
   } catch (error) {

@@ -371,6 +371,74 @@ a {
   padding: 12px 14px;
 }
 
+.healthPanel {
+  background: #fffaf2;
+  border: 1px solid #ffd7a3;
+  border-radius: 20px;
+  box-shadow: var(--shadow-soft);
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.healthPanelHeader {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.healthPanelHeader h2 {
+  font-size: 18px;
+  margin: 0 0 2px;
+}
+
+.healthGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.healthCheck {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 203, 126, 0.68);
+  border-radius: 14px;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.healthCheck span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.healthCheck strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.healthCheck small {
+  color: #9a5b1f;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.healthCheck.ok {
+  border-color: rgba(64, 196, 142, 0.42);
+}
+
+.healthCheck.warning {
+  border-color: rgba(244, 168, 72, 0.55);
+}
+
+.healthCheck.error {
+  border-color: rgba(230, 75, 97, 0.42);
+}
+
 .accentMint {
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(216, 250, 231, 0.74));
 }
