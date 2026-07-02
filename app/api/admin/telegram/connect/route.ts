@@ -54,14 +54,14 @@ export async function GET(request: NextRequest) {
       hasBotToken = Boolean(settings.telegram_bot_token);
     } catch (settingsError) {
       warnings.push("telegram_settings_unavailable");
-      console.error("telegram_connect_settings_failed", formatApiError(settingsError));
+      console.warn("telegram_connect_settings_failed", formatApiError(settingsError));
     }
 
     try {
       chats = await getConnectedTelegramChats();
     } catch (chatsError) {
       warnings.push("telegram_chats_unavailable");
-      console.error("telegram_connect_chats_failed", formatApiError(chatsError));
+      console.warn("telegram_connect_chats_failed", formatApiError(chatsError));
     }
 
     return NextResponse.json({
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof Response) return error;
-    console.error("telegram_connect_failed", formatApiError(error));
+    console.warn("telegram_connect_failed", formatApiError(error));
     return NextResponse.json({
       ok: true,
       hasBotToken: false,

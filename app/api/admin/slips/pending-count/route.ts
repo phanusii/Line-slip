@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof Response) return error;
-    console.error("admin_pending_count_failed", formatApiError(error));
+    console.warn("admin_pending_count_failed", formatApiError(error));
     return NextResponse.json({
       count: 0,
       latestSlipId: null,

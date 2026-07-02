@@ -16,6 +16,16 @@ type NormalizedTarget = {
   amount_from_default: boolean;
 };
 
+type EventRow = {
+  id: string;
+  name: string;
+  slug: string;
+  amount_mode?: "fixed" | "payer_entered";
+  is_open: boolean;
+  expected_total: number;
+  created_at?: string;
+};
+
 const promptpayTypes = new Set(["phone", "national_id", "ewallet"]);
 const amountModes = new Set(["fixed", "payer_entered"]);
 
@@ -124,19 +134,39 @@ export async function GET(request: NextRequest) {
     assertAdmin(request, "viewer");
     const supabase = createServiceClient();
 
-    const primaryEvents = await supabase
-      .from("events")
-      .select("id,name,slug,amount_mode,is_open,expected_total,created_at")
-      .is("archived_at", null)
-      .order("created_at", { ascending: false });
+    let primaryEvents: {
+      data: EventRow[] | null;
+      error: unknown;
+    };
 
-    const fallbackEvents = primaryEvents.error
-      ? await supabase
+    try {
+      primaryEvents = await supabase
+        .from("events")
+        .select("id,name,slug,amount_mode,is_open,expected_total,created_at")
+        .is("archived_at", null)
+        .order("created_at", { ascending: false });
+    } catch (queryError) {
+      console.warn("admin_events_database_unavailable", formatApiError(queryError));
+      return NextResponse.json({
+        events: [],
+        warning: "database_unavailable",
+        error: formatApiError(queryError)
+      });
+    }
+
+    let fallbackEvents: { data: EventRow[] | null; error: unknown } | null = null;
+    if (primaryEvents.error) {
+      try {
+        fallbackEvents = await supabase
           .from("events")
           .select("id,name,slug,is_open,expected_total,created_at")
           .is("archived_at", null)
-          .order("created_at", { ascending: false })
-      : null;
+          .order("created_at", { ascending: false });
+      } catch (queryError) {
+        console.warn("admin_events_fallback_query_failed", formatApiError(queryError));
+        fallbackEvents = { data: [], error: queryError };
+      }
+    }
 
     if (primaryEvents.error) {
       console.warn("admin_events_primary_query_fallback", formatApiError(primaryEvents.error));
@@ -240,7 +270,11 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     if (error instanceof Response) return error;
     console.error("admin_events_failed", formatApiError(error));
-    return NextResponse.json({ error: formatApiError(error) }, { status: 500 });
+    return NextResponse.json({
+      events: [],
+      warning: "database_unavailable",
+      error: formatApiError(error)
+    });
   }
 }
 

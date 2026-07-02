@@ -756,7 +756,7 @@ export default function Home() {
     try {
       const [usageResult, eventsResult] = await Promise.allSettled([
         api<Usage>("/api/admin/usage"),
-        api<{ events: EventSummary[] }>("/api/admin/events")
+        api<{ events: EventSummary[]; warning?: string; error?: string }>("/api/admin/events")
       ]);
 
       if (usageResult.status === "fulfilled") {
@@ -785,6 +785,11 @@ export default function Home() {
 
       const eventsData = eventsResult.value;
       setEvents(eventsData.events);
+      if (eventsData.warning === "database_unavailable") {
+        setError(
+          "เชื่อมต่อฐานข้อมูล Supabase ไม่ได้ชั่วคราว หรือ Project URL ไม่ถูกต้อง กรุณาตรวจ Supabase Project URL ใน Vercel"
+        );
+      }
       const selectedStillExists = Boolean(
         selectedEventId && eventsData.events.some((event) => event.id === selectedEventId)
       );
