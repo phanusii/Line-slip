@@ -24,6 +24,12 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof Response) return error;
-    return NextResponse.json({ error: formatApiError(error) }, { status: 500 });
+    console.error("admin_pending_count_failed", formatApiError(error));
+    return NextResponse.json({
+      count: 0,
+      latestSlipId: null,
+      latestCreatedAt: null,
+      warning: "pending_count_unavailable"
+    });
   }
 }

@@ -124,15 +124,30 @@ export async function GET(request: NextRequest) {
     assertAdmin(request, "viewer");
     const supabase = createServiceClient();
 
-    const { data: events, error } = await supabase
+    const primaryEvents = await supabase
       .from("events")
       .select("id,name,slug,amount_mode,is_open,expected_total,created_at")
       .is("archived_at", null)
       .order("created_at", { ascending: false });
 
-    if (error) throw error;
+    const fallbackEvents = primaryEvents.error
+      ? await supabase
+          .from("events")
+          .select("id,name,slug,is_open,expected_total,created_at")
+          .is("archived_at", null)
+          .order("created_at", { ascending: false })
+      : null;
 
-    const eventIds = (events ?? []).map((event) => event.id);
+    if (primaryEvents.error) {
+      console.warn("admin_events_primary_query_fallback", formatApiError(primaryEvents.error));
+    }
+
+    const eventsError = primaryEvents.error && fallbackEvents?.error ? fallbackEvents.error : null;
+    const events = (primaryEvents.error ? fallbackEvents?.data : primaryEvents.data) ?? [];
+
+    if (eventsError) throw eventsError;
+
+    const eventIds = events.map((event) => event.id);
     const [targetsResult, slipsResult] =
       eventIds.length > 0
         ? await Promise.allSettled([
@@ -193,7 +208,7 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      events: (events ?? []).map((event) => {
+      events: events.map((event) => {
         const target = targetStats.get(event.id) ?? {
           target_count: 0,
           paid_count: 0,
@@ -209,7 +224,8 @@ export async function GET(request: NextRequest) {
           id: event.id,
           name: event.name,
           slug: event.slug,
-          amount_mode: event.amount_mode,
+          amount_mode:
+            (event as { amount_mode?: "fixed" | "payer_entered" }).amount_mode ?? "fixed",
           is_open: event.is_open,
           expected_total: event.expected_total,
           target_count: target.target_count,
@@ -223,6 +239,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof Response) return error;
+    console.error("admin_events_failed", formatApiError(error));
     return NextResponse.json({ error: formatApiError(error) }, { status: 500 });
   }
 }

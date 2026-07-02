@@ -44,15 +44,40 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     assertAdmin(request, "viewer");
-    const settings = await getSettings(["telegram_bot_token"]);
-    const chats = await getConnectedTelegramChats();
+
+    let hasBotToken = false;
+    let chats: Awaited<ReturnType<typeof getConnectedTelegramChats>> = [];
+    const warnings: string[] = [];
+
+    try {
+      const settings = await getSettings(["telegram_bot_token"]);
+      hasBotToken = Boolean(settings.telegram_bot_token);
+    } catch (settingsError) {
+      warnings.push("telegram_settings_unavailable");
+      console.error("telegram_connect_settings_failed", formatApiError(settingsError));
+    }
+
+    try {
+      chats = await getConnectedTelegramChats();
+    } catch (chatsError) {
+      warnings.push("telegram_chats_unavailable");
+      console.error("telegram_connect_chats_failed", formatApiError(chatsError));
+    }
+
     return NextResponse.json({
       ok: true,
-      hasBotToken: Boolean(settings.telegram_bot_token),
-      chats
+      hasBotToken,
+      chats,
+      warnings
     });
   } catch (error) {
     if (error instanceof Response) return error;
-    return NextResponse.json({ error: formatApiError(error) }, { status: 500 });
+    console.error("telegram_connect_failed", formatApiError(error));
+    return NextResponse.json({
+      ok: true,
+      hasBotToken: false,
+      chats: [],
+      warnings: ["telegram_connect_unavailable"]
+    });
   }
 }

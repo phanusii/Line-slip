@@ -53,6 +53,23 @@ type EventSummary = {
   storage_bytes: number;
 };
 
+function eventsFromUsage(usage: Usage | null): EventSummary[] {
+  return (usage?.events ?? []).map((event) => ({
+    id: event.event_id,
+    name: event.event_name,
+    slug: event.event_slug,
+    amount_mode: "fixed",
+    is_open: true,
+    expected_total: 0,
+    target_count: 0,
+    paid_count: 0,
+    unpaid_count: 0,
+    review_count: event.review_count,
+    slip_count: event.file_count,
+    storage_bytes: event.storage_bytes
+  }));
+}
+
 type PendingCount = {
   count: number;
   latestSlipId: string | null;
@@ -749,6 +766,20 @@ export default function Home() {
       }
 
       if (eventsResult.status === "rejected") {
+        const fallbackEvents = eventsFromUsage(
+          usageResult.status === "fulfilled" ? usageResult.value : null
+        );
+        if (fallbackEvents.length > 0) {
+          setEvents(fallbackEvents);
+          const selectedStillExists = Boolean(
+            selectedEventId && fallbackEvents.some((event) => event.id === selectedEventId)
+          );
+          const activeId = selectedStillExists ? selectedEventId : fallbackEvents[0]?.id ?? null;
+          setSelectedEventId(activeId);
+          setDetail(null);
+          setError("โหลดรายละเอียดงานไม่ได้ชั่วคราว แต่ยังแสดงรายการงานจากข้อมูลสำรองได้");
+          return;
+        }
         throw eventsResult.reason;
       }
 
@@ -760,7 +791,16 @@ export default function Home() {
       const activeId = selectedStillExists ? selectedEventId : eventsData.events[0]?.id ?? null;
       setSelectedEventId(activeId);
       if (activeId) {
-        setDetail(await api<EventDetail>(`/api/admin/events/${activeId}`));
+        try {
+          setDetail(await api<EventDetail>(`/api/admin/events/${activeId}`));
+        } catch (detailError) {
+          setDetail(null);
+          setError(
+            detailError instanceof Error
+              ? detailError.message
+              : "โหลดรายละเอียดงานไม่ได้ชั่วคราว"
+          );
+        }
       } else {
         setDetail(null);
       }
