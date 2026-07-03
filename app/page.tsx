@@ -276,6 +276,19 @@ function settingEnabled(value: string | undefined, defaultValue = false) {
   return value === "true" || value === "1" || value === "enabled";
 }
 
+function slipOkStatusMessage(data: SlipOkQuota) {
+  const remaining = data.quota?.remaining ?? data.quota?.quota;
+  const quotaText = remaining === null || remaining === undefined
+    ? ""
+    : ` เหลือ ${remaining.toLocaleString("th-TH")} สลิป`;
+  if (data.quota?.ok) {
+    return data.enabled
+      ? `SlipOK พร้อมใช้งาน${quotaText}`
+      : `SlipOK เชื่อมต่อได้${quotaText} แต่ระบบยังอยู่โหมด Manual`;
+  }
+  return `SlipOK ใช้งานไม่ได้: ${data.quota?.error ?? data.error ?? "ไม่ทราบสาเหตุ"}`;
+}
+
 function autoReasonText(reasons: string[] | null | undefined) {
   if (!reasons?.length) return "-";
   return reasons.map((reason) => autoReasonLabels[reason] ?? reason).join(", ");
@@ -407,6 +420,7 @@ export default function Home() {
   const [slipokLogEnabled, setSlipokLogEnabled] = useState(true);
   const [slipokAutoApproveEnabled, setSlipokAutoApproveEnabled] = useState(true);
   const [slipokQuota, setSlipokQuota] = useState<SlipOkQuota | null>(null);
+  const [slipokChecking, setSlipokChecking] = useState(false);
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramChatId, setTelegramChatId] = useState("");
   const [telegramConnect, setTelegramConnect] = useState<TelegramConnect | null>(null);
@@ -658,11 +672,21 @@ export default function Home() {
     }
   }
 
-  async function loadSlipOkQuota() {
+  async function loadSlipOkQuota(showToast = false) {
+    if (showToast) {
+      setSlipokChecking(true);
+      setError(null);
+    }
     try {
-      setSlipokQuota(await api<SlipOkQuota>("/api/admin/slipok/quota"));
-    } catch {
-      // non-critical
+      const data = await api<SlipOkQuota>("/api/admin/slipok/quota");
+      setSlipokQuota(data);
+      setSlipVerificationProvider(data.provider);
+      if (showToast) setToast(slipOkStatusMessage(data));
+    } catch (err) {
+      if (showToast) setError(err instanceof Error ? err.message : String(err));
+      // non-critical during background loading
+    } finally {
+      if (showToast) setSlipokChecking(false);
     }
   }
 
@@ -1278,6 +1302,10 @@ export default function Home() {
                 <button className="btn subtle" disabled={healthChecking} onClick={() => loadAdminHealth()}>
                   <AlertTriangle size={16} />
                   {healthChecking ? "กำลังตรวจ" : "ตรวจฐานข้อมูล"}
+                </button>
+                <button className="btn subtle" disabled={slipokChecking} onClick={() => loadSlipOkQuota(true)}>
+                  <ShieldCheck size={16} />
+                  {slipokChecking ? "กำลังเช็ก" : "สถานะ SlipOK"}
                 </button>
                 <button className="btn subtle" disabled={busy} onClick={logoutAdmin}>
                   <LogOut size={16} />
@@ -2102,7 +2130,7 @@ export default function Home() {
             >
               {contactUrlSaved ? "บันทึกแล้ว ✓" : "บันทึกตั้งค่า"}
             </button>
-            <button className="btn subtle" onClick={loadSlipOkQuota}>
+            <button className="btn subtle" onClick={() => loadSlipOkQuota(true)}>
               เช็กโควต้า SlipOK
             </button>
           </div>
