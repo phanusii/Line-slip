@@ -9,9 +9,9 @@ import {
   acquireSlipOkQuotaLease,
   disableSlipOkToManual,
   getSlipOkQuota,
-  isSlipOkQuotaExhausted,
   recordSlipOkUsage,
   releaseSlipOkQuotaLease,
+  slipOkAutoDisableReason,
   type SlipOkQuotaSnapshot,
   verifySlipWithSlipOk
 } from "@/lib/slipok";
@@ -433,6 +433,7 @@ async function runProviderCheck(input: {
       error: error instanceof Error ? error.message : String(error)
     }) satisfies SlipOkQuotaSnapshot);
 
+    const quotaBeforeDisableReason = slipOkAutoDisableReason(quotaBefore);
     if (!quotaBefore.ok) {
       return {
         ...manualCheck,
@@ -440,11 +441,12 @@ async function runProviderCheck(input: {
         checkStatus: "quota_check_failed",
         reasons: ["slipok_quota_check_failed"],
         response: { quotaBefore },
-        usageStatus: "quota_check_failed"
+        usageStatus: "quota_check_failed",
+        disableReason: quotaBeforeDisableReason
       };
     }
 
-    if (isSlipOkQuotaExhausted(quotaBefore)) {
+    if (quotaBeforeDisableReason) {
       return {
         ...manualCheck,
         verificationProvider: "slipok",
@@ -453,7 +455,7 @@ async function runProviderCheck(input: {
         response: { quotaBefore },
         quotaBefore,
         usageStatus: "skipped_quota_exhausted",
-        disableReason: "SlipOK เหลือ 1 ครั้งหรือน้อยกว่า ระบบจึงปิดกลับเป็น Manual เพื่อไม่ให้เกิดค่าใช้จ่าย"
+        disableReason: quotaBeforeDisableReason
       };
     }
 
@@ -504,9 +506,7 @@ async function runProviderCheck(input: {
       quotaBefore,
       quotaAfter,
       usageStatus: verification.passed ? "passed" : verification.checkStatus,
-      disableReason: isSlipOkQuotaExhausted(quotaAfter)
-        ? "SlipOK เหลือ 1 ครั้งหรือน้อยกว่าหลังตรวจสลิป ระบบจึงปิดกลับเป็น Manual เพื่อไม่ให้เกิดค่าใช้จ่าย"
-        : null
+      disableReason: slipOkAutoDisableReason(quotaAfter)
     };
   } finally {
     await releaseSlipOkQuotaLease(leaseToken).catch((error) => {

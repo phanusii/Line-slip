@@ -171,6 +171,30 @@ export function isSlipOkQuotaExhausted(quota: SlipOkQuotaSnapshot | null | undef
   return Number(quota.remaining ?? quota.quota ?? 1) <= 1 || Number(quota.overQuota ?? 0) > 0;
 }
 
+function slipOkRawCode(raw: unknown) {
+  if (!raw || typeof raw !== "object") return null;
+  return toNumber((raw as Record<string, unknown>).code);
+}
+
+export function slipOkAutoDisableReason(quota: SlipOkQuotaSnapshot | null | undefined) {
+  if (!quota) return null;
+  if (isSlipOkQuotaExhausted(quota)) {
+    return "SlipOK เหลือ 1 ครั้งหรือน้อยกว่า ระบบจึงปิดเป็น Manual เพื่อป้องกันค่าใช้จ่าย";
+  }
+  if (quota.ok) return null;
+
+  const code = slipOkRawCode(quota.raw);
+  const message = quota.error ?? "";
+  if (code === 1003 || /หมดอายุ|expired|package/i.test(message)) {
+    return "แพ็กเกจ SlipOK หมดอายุ ระบบจึงปิดเป็น Manual";
+  }
+  if (/ยังไม่ได้ตั้งค่า|missing|credential|api key|branch id/i.test(message)) {
+    return "ยังไม่ได้ตั้งค่า SlipOK API Key หรือ Branch ID ระบบจึงปิดเป็น Manual";
+  }
+
+  return null;
+}
+
 const slipOkLeaseId = "slipok";
 const slipOkLeaseTtlMs = 90_000;
 

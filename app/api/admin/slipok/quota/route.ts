@@ -7,7 +7,7 @@ import {
   disableSlipOkToManual,
   getSlipOkQuota,
   getSlipOkUsedThisMonth,
-  isSlipOkQuotaExhausted
+  slipOkAutoDisableReason
 } from "@/lib/slipok";
 
 export async function GET(request: NextRequest) {
@@ -24,8 +24,9 @@ export async function GET(request: NextRequest) {
     const monthKey = currentBangkokMonthKey();
     const usedThisMonth = await getSlipOkUsedThisMonth(monthKey).catch(() => 0);
 
-    if (getSlipVerificationProvider(settings) === "slipok" && isSlipOkQuotaExhausted(quota)) {
-      const reason = "SlipOK เหลือ 1 ครั้งหรือน้อยกว่า ระบบจึงปิดเป็น Manual เพื่อป้องกันค่าใช้จ่าย";
+    const disableReason = slipOkAutoDisableReason(quota);
+    if (getSlipVerificationProvider(settings) === "slipok" && disableReason) {
+      const reason = disableReason;
       await disableSlipOkToManual(reason);
       settings.slip_verification_provider = "manual";
       settings.slipok_disabled_reason = reason;
