@@ -545,6 +545,7 @@ async function queuedOrManualProviderCheck(fallbackReference: string | null): Pr
 export async function processDeferredSlipVerification(input: {
   slipId: string;
   notifyAdminOnManual?: boolean;
+  force?: boolean;
 }) {
   const supabase = createServiceClient();
   const { data: slip, error } = await supabase
@@ -555,7 +556,7 @@ export async function processDeferredSlipVerification(input: {
 
   if (error) throw error;
   if (!slip || slip.status !== "manual_review") return { ok: true, skipped: "not_manual_review" };
-  if (slip.verification_provider !== "slipok" || slip.provider_check_status !== "slipok_queued") {
+  if (!input.force && (slip.verification_provider !== "slipok" || slip.provider_check_status !== "slipok_queued")) {
     if (input.notifyAdminOnManual !== false) await notifyAdminSlipReview(input.slipId);
     return { ok: true, skipped: "not_slipok_queued" };
   }

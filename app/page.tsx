@@ -305,6 +305,10 @@ function canReviewSlip(slip: SlipRow) {
   );
 }
 
+function canRunSlipOkCheck(slip: SlipRow) {
+  return canReviewSlip(slip) && Boolean(slip.storage_path && !slip.file_deleted_at);
+}
+
 type AuthUser = {
   email: string;
   role: "admin" | "viewer";
@@ -988,6 +992,33 @@ export default function Home() {
         setDetail(await api<EventDetail>(`/api/admin/events/${selectedEventId}`));
       }
       await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runSlipOkCheck(slipId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api<{ ok: boolean; status?: string; skipped?: string; autoCheckStatus?: string }>(
+        `/api/admin/slips/${slipId}/verify`,
+        { method: "POST", body: "{}" }
+      );
+      if (result.status === "verified") {
+        setToast("SlipOK ตรวจผ่านและอนุมัติสลิปแล้ว");
+      } else if (result.skipped) {
+        setToast(`ยังตรวจไม่ได้: ${result.skipped}`);
+      } else {
+        setToast(`ตรวจสลิปแล้ว: ${result.autoCheckStatus ?? result.status ?? "รอแอดมินตรวจ"}`);
+      }
+      if (selectedEventId) {
+        setDetail(await api<EventDetail>(`/api/admin/events/${selectedEventId}`));
+      }
+      await loadAll();
+      setPreviewSlip((current) => (current?.slip.id === slipId ? null : current));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1990,6 +2021,13 @@ export default function Home() {
                             <Download size={15} />
                           </button>
                           <button
+                            className="btn subtle slipVerifyBtn"
+                            disabled={busy || !canRunSlipOkCheck(slip)}
+                            onClick={() => runSlipOkCheck(slip.id)}
+                          >
+                            ตรวจสลิป
+                          </button>
+                          <button
                             className="btn ok"
                             disabled={busy || !canReviewSlip(slip)}
                             onClick={() => updateSlipStatus(slip.id, "verified")}
@@ -2760,6 +2798,13 @@ export default function Home() {
               >
                 <Download size={15} />
                 ดาวน์โหลด
+              </button>
+              <button
+                className="btn subtle"
+                disabled={busy || !canRunSlipOkCheck(previewSlip.slip)}
+                onClick={() => runSlipOkCheck(previewSlip.slip.id)}
+              >
+                ตรวจสลิป
               </button>
               <button
                 className="btn subtle"

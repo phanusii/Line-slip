@@ -1020,6 +1020,7 @@ tbody tr:hover {
 .slipActions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: auto;
 }
@@ -1027,6 +1028,12 @@ tbody tr:hover {
 .slipActions .slipDownloadBtn {
   flex: 0 0 auto;
   min-width: 0;
+  padding: 6px 10px;
+}
+
+.slipActions .slipVerifyBtn {
+  flex: 1 1 96px;
+  font-size: 13px;
   padding: 6px 10px;
 }
 
@@ -2874,6 +2881,7 @@ tbody tr:hover {
     padding: 3px 7px;
   }
 
+  .slipActions .slipVerifyBtn,
   .slipActions .btn.ok,
   .slipActions .btn.danger {
     font-size: 12px;
